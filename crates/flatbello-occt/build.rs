@@ -104,7 +104,11 @@ fn main() -> Result<(), String> {
     }
     let missing: Vec<&str> = COMMON_LIBS
         .iter()
-        .chain(preferred.iter().filter(|l| **l != "TKDESTL" && **l != "TKSTL"))
+        .chain(
+            preferred
+                .iter()
+                .filter(|l| **l != "TKDESTL" && **l != "TKSTL"),
+        )
         .filter(|l| !linked.contains(l))
         .copied()
         .collect();

@@ -118,6 +118,13 @@ apps/flatbello                 desktop app (egui + wgpu)
 tools/gen-fixtures             generates test models with OCCT
 ```
 
+## Installers
+
+`.github/workflows/package.yml` builds a `.deb` (Ubuntu 26.04, depending on the distribution's OCCT), a
+Windows NSIS installer (with OCCT's DLLs from vcpkg) and a macOS `.dmg` (with OCCT's dylibs copied into the
+app bundle by `tools/package/macos-bundle-occt.sh`). It runs on version tags, on demand, and when the
+packaging files change. Locally: `cargo packager --release -p flatbello --formats deb` in `apps/flatbello`.
+
 Product and architecture decisions are recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## License

@@ -185,3 +185,29 @@ split in M5 only has to send plain data, and OCCT stays inside two crates.
 - Results on the generated fixtures: plate with holes, slotted plate, asymmetric plate and L-bracket
   reproduce the exact profiles at 0.1, 0.01 and 0.002 mm deflection, coarse included (same counts and
   radii). The B-spline part's curve becomes 2–8 arcs plus short lines, within 0.01 mm of the outline.
+
+## 2026-10-17 — DXF R2000 is the default (M5)
+
+`dxf` now means DXF R2000 (AC1015) with `$INSUNITS = 4`; R12 stays available as `dxf-r12`. The writer emits
+every table AutoCAD requires, model and paper space blocks and the root dictionary, with unique handles
+and valid owners. Two export options, both off by default because many cutters read only lines and arcs:
+`native_curves` (ELLIPSE and SPLINE entities instead of polylines) and `loops_as_polylines` (each loop as one
+closed LWPOLYLINE with arcs as bulges). Plot-style and layout objects are not written; LibreCAD, QCAD,
+Inkscape and LightBurn do not need them. Caleb to confirm in his tools.
+
+## 2026-10-17 — Worker process (M5)
+
+The app runs the engine in a child process of its own executable (`--worker`), over the framed protocol
+in `flatbello_engine::wire`: a little-endian u32 length, then a hand-encoded message. A backend thread owns
+the worker; if the worker dies, the job fails, the app drops the lost model and says so, and the next job
+starts a fresh worker. Render meshes cross the pipe as f32; profiles as f64 and are revalidated.
+`FLATBELLO_IN_PROCESS=1` keeps the engine in the app; tests and headless snapshots use that mode. The
+`Crash` request exists only so tests can kill the worker on purpose.
+
+## 2026-10-17 — Packaging (M5)
+
+cargo-packager builds the installers in CI. Linux: a `.deb` that depends on Ubuntu 26.04's OCCT 7.9
+packages instead of bundling them. Windows: NSIS, with vcpkg's OCCT DLLs and licence next to the
+executable. macOS: an `.app` whose Homebrew dylibs are copied into `Contents/Frameworks` and rewritten to
+`@rpath`, ad-hoc signed, in a `.dmg`. No app icon yet. Installers are unsigned, so Windows SmartScreen and
+macOS Gatekeeper will warn until signing certificates are set up.
