@@ -87,7 +87,8 @@ jobs:
           Copy-Item "$env:OCCT_ROOT\bin\*.dll" $res
           Get-ChildItem "$env:OCCT_ROOT\share\opencascade" -File | Copy-Item -Destination $res
           Get-ChildItem $res | Select-Object -ExpandProperty Name
-      - run: cargo packager --release -p flatbello --formats nsis
+      - run: ../../tools/ci/annotate.sh cargo packager --release -p flatbello --formats nsis
+        shell: bash
         working-directory: apps/flatbello
       - uses: actions/upload-artifact@v4
         with:
@@ -116,7 +117,7 @@ jobs:
       # Copy OCCT's dylibs into the bundle so it runs without Homebrew, then build the .dmg.
       - run: |
           app=$(find target/release -maxdepth 2 -name "Flatbello.app" | head -n 1)
-          tools/package/macos-bundle-occt.sh "$app" target/release/Flatbello.dmg
+          tools/ci/annotate.sh bash -x tools/package/macos-bundle-occt.sh "$app" target/release/Flatbello.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: flatbello-macos-dmg
