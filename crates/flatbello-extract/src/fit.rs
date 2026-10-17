@@ -168,6 +168,32 @@ fn arc_fit(pts: &[Point2], fit: f64) -> Option<(Circle, bool, f64)> {
     (sweep < TAU - 1e-6).then_some((c, ccw, err))
 }
 
+/// The point of the circle nearest `p`.
+fn project(c: &Circle, p: Point2) -> Point2 {
+    (p - c.center)
+        .normalized()
+        .map_or(p, |u| c.center + u * c.radius)
+}
+
+/// The intersection of two circles nearest `p`, if they intersect.
+fn nearest_intersection(a: &Circle, b: &Circle, p: Point2) -> Option<Point2> {
+    let d = b.center - a.center;
+    let dist = d.length();
+    if dist <= 0.0 || dist > a.radius + b.radius || dist < (a.radius - b.radius).abs() {
+        return None;
+    }
+    let along = (a.radius * a.radius - b.radius * b.radius + dist * dist) / (2.0 * dist);
+    let h = (a.radius * a.radius - along * along).max(0.0).sqrt();
+    let u = d * (1.0 / dist);
+    let base = a.center + u * along;
+    let (p1, p2) = (base + u.perp() * h, base - u.perp() * h);
+    Some(if p1.distance(p) <= p2.distance(p) {
+        p1
+    } else {
+        p2
+    })
+}
+
 /// Removes repeated points and points within `linear` of the line through their neighbours.
 pub fn simplify(points: &[Point2], tol: &Tolerance) -> Vec<Point2> {
     let mut pts: Vec<Point2> = Vec::with_capacity(points.len());
@@ -340,46 +366,63 @@ pub fn fit_loop(points: &[Point2], tol: &Tolerance) -> Option<Vec<Edge>> {
         runs.push(run);
     }
 
-    // Snap every joint onto the arcs that meet there, so segments chain exactly.
+    // Where segments meet, find a point on both: between two arcs, the intersection of their
+    // circles nearest the vertex; next to one arc, the vertex moved onto it. Two arcs whose
+    // circles miss each other each end at their own nearest point, bridged by a short line.
     let starts: Vec<usize> = std::iter::once(0)
         .chain(runs.iter().map(Run::end))
         .collect();
-    let mut joints: Vec<Point2> = starts.iter().map(|&k| ring[k]).collect();
-    for (k, run) in runs.iter().enumerate() {
-        if let Run::Arc { circle, .. } = run {
-            for j in [k, k + 1] {
-                let d = joints[j] - circle.center;
-                if let Some(u) = d.normalized() {
-                    joints[j] = circle.center + u * circle.radius;
-                }
-            }
-        }
+    let circle_of = |r: &Run| match r {
+        Run::Arc { circle, .. } => Some(*circle),
+        Run::Line { .. } => None,
+    };
+    let count = runs.len();
+    // For joint j: where run j - 1 ends and where run j starts.
+    let mut ends: Vec<(Point2, Point2)> = Vec::with_capacity(count);
+    for &k in &starts[..count] {
+        let j = ends.len();
+        let v = ring[k];
+        let before = circle_of(&runs[(j + count - 1) % count]);
+        let after = circle_of(&runs[j]);
+        ends.push(match (before, after) {
+            (Some(a), Some(b)) => match nearest_intersection(&a, &b, v) {
+                Some(p) => (p, p),
+                None => (project(&a, v), project(&b, v)),
+            },
+            (Some(c), None) | (None, Some(c)) => (project(&c, v), project(&c, v)),
+            (None, None) => (v, v),
+        });
     }
-    let last = joints.len() - 1;
-    joints[last] = joints[0];
 
-    let edges = runs
-        .iter()
-        .enumerate()
-        .map(|(k, run)| {
-            let (a, b) = (joints[k], joints[k + 1]);
-            match run {
-                Run::Line { err, .. } => Edge::fitted(Segment::Line { a, b }, *err),
-                Run::Arc {
-                    circle, ccw, err, ..
-                } => Edge::fitted(
-                    Segment::Arc {
-                        center: circle.center,
-                        radius: circle.radius,
-                        start_angle: (a - circle.center).angle(),
-                        end_angle: (b - circle.center).angle(),
-                        ccw: *ccw,
-                    },
-                    *err,
-                ),
-            }
-        })
-        .collect();
+    let mut edges = Vec::with_capacity(count);
+    for (k, run) in runs.iter().enumerate() {
+        let (end_before, a) = ends[k];
+        if end_before.distance(a) > tol.linear() {
+            edges.push(Edge::fitted(
+                Segment::Line {
+                    a: end_before,
+                    b: a,
+                },
+                end_before.distance(a),
+            ));
+        }
+        let b = ends[(k + 1) % count].0;
+        edges.push(match run {
+            Run::Line { err, .. } => Edge::fitted(Segment::Line { a, b }, *err),
+            Run::Arc {
+                circle, ccw, err, ..
+            } => Edge::fitted(
+                Segment::Arc {
+                    center: circle.center,
+                    radius: circle.radius,
+                    start_angle: (a - circle.center).angle(),
+                    end_angle: (b - circle.center).angle(),
+                    ccw: *ccw,
+                },
+                *err,
+            ),
+        });
+    }
     Some(edges)
 }
 

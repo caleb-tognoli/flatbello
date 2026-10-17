@@ -88,6 +88,9 @@ fn asym_plate() -> Result<Shape, OcctError> {
     boxed(0.0, 0.0, 0.0, 50.0, 30.0, 3.0)?.cut(&hole_z(40.0, 22.0, 3.0, 3.0)?)
 }
 
+/// Tessellation levels for the STL fixtures: name and linear deflection in mm.
+const STL_LEVELS: [(&str, f64); 3] = [("coarse", 0.1), ("medium", 0.01), ("fine", 0.002)];
+
 /// Builds one fixture part.
 type Builder = fn() -> Result<Shape, OcctError>;
 
@@ -107,6 +110,18 @@ fn generate(dir: &Path) -> Result<(), String> {
             .write_step(&path)
             .map_err(|e| format!("{}: {e}", path.display()))?;
         println!("wrote {}", path.display());
+    }
+    // STL exports at three tessellation levels, for the mesh pipeline. One medium file is
+    // ASCII, to exercise the ASCII reader.
+    for (name, build) in parts {
+        for (level, deflection) in STL_LEVELS {
+            let path = dir.join(format!("{name}_{level}.stl"));
+            let ascii = name == "plate_holes" && level == "medium";
+            build()
+                .and_then(|s| s.write_stl(&path, deflection, ascii))
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            println!("wrote {}", path.display());
+        }
     }
     // One IGES file, to exercise the IGES importer.
     let path = dir.join("plate_holes.igs");

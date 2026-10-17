@@ -639,13 +639,14 @@ int fb_write_iges(const fb_shape *shape, const char *path) {
     });
 }
 
-int fb_write_stl(fb_shape *shape, const char *path, double deflection) {
+int fb_write_stl(fb_shape *shape, const char *path, double deflection, int ascii) {
     return guard([&]() -> int {
         std::lock_guard<std::mutex> lock(g_translator_lock);
         if (!shape || !path || !(deflection > 0.0)) return fail(FB_EINVAL, "bad argument");
         BRepMesh_IncrementalMesh mesher(shape->shape, deflection, Standard_False, 0.5,
                                         Standard_False);
         StlAPI_Writer writer;
+        writer.ASCIIMode() = ascii != 0;
         if (!writer.Write(shape->shape, path)) return fail(FB_EREAD, "STL write failed");
         return FB_OK;
     });
