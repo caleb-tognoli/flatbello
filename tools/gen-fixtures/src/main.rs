@@ -108,5 +108,11 @@ fn generate(dir: &Path) -> Result<(), String> {
             .map_err(|e| format!("{}: {e}", path.display()))?;
         println!("wrote {}", path.display());
     }
+    // One IGES file, to exercise the IGES importer.
+    let path = dir.join("plate_holes.igs");
+    plate_holes()
+        .and_then(|s| s.write_iges(&path))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    println!("wrote {}", path.display());
     Ok(())
 }

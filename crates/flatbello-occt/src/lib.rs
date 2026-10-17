@@ -158,6 +158,7 @@ mod ffi {
         pub fn fb_fuse(a: *const fb_shape, b: *const fb_shape, out: *mut *mut fb_shape) -> c_int;
         pub fn fb_cut(a: *const fb_shape, b: *const fb_shape, out: *mut *mut fb_shape) -> c_int;
         pub fn fb_write_step(shape: *const fb_shape, path: *const c_char) -> c_int;
+        pub fn fb_write_iges(shape: *const fb_shape, path: *const c_char) -> c_int;
         pub fn fb_write_stl(shape: *mut fb_shape, path: *const c_char, deflection: f64) -> c_int;
     }
 }
@@ -616,6 +617,12 @@ impl Shape {
         let c = path_cstring(path)?;
         // SAFETY: the shape is live and `c` is a NUL-terminated string alive for the call.
         check(unsafe { ffi::fb_write_step(self.raw(), c.as_ptr()) })
+    }
+
+    pub fn write_iges(&self, path: &std::path::Path) -> Result<(), OcctError> {
+        let c = path_cstring(path)?;
+        // SAFETY: as in `write_step`.
+        check(unsafe { ffi::fb_write_iges(self.raw(), c.as_ptr()) })
     }
 
     pub fn write_stl(&self, path: &std::path::Path, deflection: f64) -> Result<(), OcctError> {

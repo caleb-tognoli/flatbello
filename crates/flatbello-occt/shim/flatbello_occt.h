@@ -126,6 +126,7 @@ int fb_make_bspline_prism(const double *poles, size_t n, size_t degree, double h
 int fb_fuse(const fb_shape *a, const fb_shape *b, fb_shape **out);
 int fb_cut(const fb_shape *a, const fb_shape *b, fb_shape **out);
 int fb_write_step(const fb_shape *shape, const char *path);
+int fb_write_iges(const fb_shape *shape, const char *path);
 int fb_write_stl(fb_shape *shape, const char *path, double deflection);
 #endif
 

@@ -50,6 +50,7 @@
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <IGESControl_Writer.hxx>
 #include <STEPControl_Writer.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <StlAPI_Writer.hxx>
@@ -151,6 +152,27 @@ double unit_scale(std::string name) {
     return 0.0;
 }
 
+/// Millimetres per unit from an IGES global section's unit flag (IGES 5.3, section 2.2.4.3).
+double iges_unit_scale(const IGESData_GlobalSection &g) {
+    switch (g.UnitFlag()) {
+    case 1: return 25.4;       // inch
+    case 2: return 1.0;        // millimetre
+    case 4: return 304.8;      // foot
+    case 5: return 1609344.0;  // mile
+    case 6: return 1000.0;     // metre
+    case 7: return 1.0e6;      // kilometre
+    case 8: return 0.0254;     // mil
+    case 9: return 0.001;      // micron
+    case 10: return 10.0;      // centimetre
+    case 11: return 2.54e-5;   // microinch
+    default: {
+        // Flag 3: the unit is named in the file.
+        Handle(TCollection_HAsciiString) name = g.UnitName();
+        return name.IsNull() ? 1.0 : unit_scale(name->ToCString());
+    }
+    }
+}
+
 fb_shape *wrap(const TopoDS_Shape &s, double mm_per_unit) {
     auto *out = new fb_shape();
     out->shape = s;
@@ -159,6 +181,10 @@ fb_shape *wrap(const TopoDS_Shape &s, double mm_per_unit) {
     out->cache.resize(static_cast<size_t>(out->faces.Extent()));
     return out;
 }
+
+/// OCCT's STEP and IGES translators share global state and crash when used from several
+/// threads at once, so every read and write holds this lock.
+std::mutex g_translator_lock;
 
 /// Writes bytes to a fresh temporary file and returns its path.
 std::filesystem::path temp_file(const uint8_t *data, size_t len, const char *ext) {
@@ -238,6 +264,7 @@ const char *fb_last_error(void) { return g_error.c_str(); }
 
 int fb_load_step(const uint8_t *data, size_t len, fb_shape **out) {
     return guard([&]() -> int {
+        std::lock_guard<std::mutex> lock(g_translator_lock);
         if (!data || !out) return fail(FB_EINVAL, "null argument");
         *out = nullptr;
         STEPControl_Reader reader;
@@ -273,6 +300,7 @@ int fb_load_step(const uint8_t *data, size_t len, fb_shape **out) {
 
 int fb_load_iges(const uint8_t *data, size_t len, fb_shape **out) {
     return guard([&]() -> int {
+        std::lock_guard<std::mutex> lock(g_translator_lock);
         if (!data || !out) return fail(FB_EINVAL, "null argument");
         *out = nullptr;
         // IGESControl_Reader reads only from files.
@@ -288,8 +316,7 @@ int fb_load_iges(const uint8_t *data, size_t len, fb_shape **out) {
         if (reader.ReadFile(path.string().c_str()) != IFSelect_RetDone) {
             return fail(FB_EREAD, "not a readable IGES file");
         }
-        // The global section gives the file's unit in metres.
-        double scale = reader.IGESModel()->GlobalSection().UnitValue() * 1000.0;
+        const double scale = iges_unit_scale(reader.IGESModel()->GlobalSection());
         if (reader.TransferRoots() <= 0) return fail(FB_EEMPTY, "the IGES file has no shapes");
         TopoDS_Shape s = reader.OneShape();
         if (s.IsNull()) return fail(FB_EEMPTY, "the IGES file has no shapes");
@@ -588,6 +615,7 @@ int fb_cut(const fb_shape *a, const fb_shape *b, fb_shape **out) {
 
 int fb_write_step(const fb_shape *shape, const char *path) {
     return guard([&]() -> int {
+        std::lock_guard<std::mutex> lock(g_translator_lock);
         if (!shape || !path) return fail(FB_EINVAL, "null argument");
         STEPControl_Writer writer;
         if (writer.Transfer(shape->shape, STEPControl_AsIs) != IFSelect_RetDone) {
@@ -598,8 +626,22 @@ int fb_write_step(const fb_shape *shape, const char *path) {
     });
 }
 
+int fb_write_iges(const fb_shape *shape, const char *path) {
+    return guard([&]() -> int {
+        std::lock_guard<std::mutex> lock(g_translator_lock);
+        if (!shape || !path) return fail(FB_EINVAL, "null argument");
+        // Mode 0 writes trimmed surfaces, the form most IGES files in the wild use.
+        IGESControl_Writer writer("MM", 0);
+        if (!writer.AddShape(shape->shape)) return fail(FB_EOCCT, "IGES transfer failed");
+        writer.ComputeModel();
+        if (!writer.Write(path)) return fail(FB_EREAD, "IGES write failed");
+        return FB_OK;
+    });
+}
+
 int fb_write_stl(fb_shape *shape, const char *path, double deflection) {
     return guard([&]() -> int {
+        std::lock_guard<std::mutex> lock(g_translator_lock);
         if (!shape || !path || !(deflection > 0.0)) return fail(FB_EINVAL, "bad argument");
         BRepMesh_IncrementalMesh mesher(shape->shape, deflection, Standard_False, 0.5,
                                         Standard_False);

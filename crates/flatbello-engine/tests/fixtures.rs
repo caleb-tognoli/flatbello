@@ -303,3 +303,27 @@ fn truncated_and_corrupt_files_are_errors() {
     let _ = e.open(&garbled, "garbled.step", &opts);
     assert!(e.open(b"ISO-10303-21;\nnonsense", "x.step", &opts).is_err());
 }
+
+#[test]
+fn iges_plate_holes() {
+    let (e, id) = open("plate_holes.igs");
+    assert_eq!(e.model(id).unwrap().units, LengthUnit::Millimetre);
+    // Trimmed-surface IGES has no solid, so pick the largest planar face either way up.
+    let model = e.model(id).unwrap();
+    let flatbello_core::ModelGeometry::Brep(breps) = &model.geometry;
+    let big = e
+        .faces(id)
+        .unwrap()
+        .iter()
+        .filter(|f| f.kind == FaceKind::Planar)
+        .max_by(|a, b| a.area.total_cmp(&b.area))
+        .unwrap();
+    let normal = breps[big.id.0 as usize].plane.unwrap().normal;
+    assert!(normal.z.abs() > 1.0 - 1e-9);
+    let p = extract(&e, id, big.id);
+    assert_frame(&p, normal);
+    assert_size(&p, 100.0, 60.0);
+    let z = if normal.z > 0.0 { 5.0 } else { 0.0 };
+    assert_hole(&p, Point3::new(20.0, 30.0, z), 5.0);
+    assert_hole(&p, Point3::new(80.0, 30.0, z), 3.0);
+}
