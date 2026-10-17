@@ -1,6 +1,6 @@
 //! Profile segments: lines, arcs, circles, ellipses, splines and polylines.
 
-use core::f64::consts::{FRAC_PI_2, TAU};
+use core::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use crate::angle::{angle_in_sweep, sweep};
 use crate::bbox::Bbox2;
@@ -83,11 +83,13 @@ impl Edge {
     }
 }
 
-fn circle_point(center: Point2, radius: f64, angle: f64) -> Point2 {
+/// The point at `angle` on a circle.
+pub fn circle_point(center: Point2, radius: f64, angle: f64) -> Point2 {
     center + Vec2::from_angle(angle) * radius
 }
 
-fn ellipse_point(center: Point2, major: Vec2, ratio: f64, t: f64) -> Point2 {
+/// The point at parameter `t` on the ellipse described in [`Segment::Ellipse`].
+pub fn ellipse_point(center: Point2, major: Vec2, ratio: f64, t: f64) -> Point2 {
     let (s, c) = t.sin_cos();
     center + major * c + major.perp() * (ratio * s)
 }
@@ -407,8 +409,8 @@ impl Segment {
         }
     }
 
-    /// The bounding box: exact for lines, arcs, circles and polylines; ellipses and splines
-    /// use their flattening and may fall short by up to `fit`.
+    /// The bounding box: exact except for splines, which use their flattening and may fall
+    /// short by up to `fit`.
     pub fn bbox(&self, fit: f64) -> Bbox2 {
         let mut b = Bbox2::EMPTY;
         match self {
@@ -437,10 +439,29 @@ impl Segment {
                 b.include(*center - Vec2::new(*radius, *radius));
                 b.include(*center + Vec2::new(*radius, *radius));
             }
-            Segment::Polyline { points } => points.iter().for_each(|p| b.include(*p)),
-            Segment::Ellipse { .. } | Segment::Spline(_) => {
-                self.flatten(fit).iter().for_each(|p| b.include(*p))
+            Segment::Ellipse {
+                center,
+                major_axis,
+                ratio,
+                start,
+                end,
+                ccw,
+            } => {
+                b.include(self.start_point());
+                b.include(self.end_point());
+                let s = sweep(*start, *end, *ccw);
+                let minor = major_axis.perp() * *ratio;
+                // x(t) and y(t) are extreme where their derivatives vanish: tan t = minor / major.
+                let tx = minor.x.atan2(major_axis.x);
+                let ty = minor.y.atan2(major_axis.y);
+                for t in [tx, tx + PI, ty, ty + PI] {
+                    if angle_in_sweep(t, *start, s, *ccw) {
+                        b.include(ellipse_point(*center, *major_axis, *ratio, t));
+                    }
+                }
             }
+            Segment::Polyline { points } => points.iter().for_each(|p| b.include(*p)),
+            Segment::Spline(_) => self.flatten(fit).iter().for_each(|p| b.include(*p)),
         }
         b
     }
@@ -461,7 +482,6 @@ fn polyline_length(points: &[Point2]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::f64::consts::PI;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
@@ -640,6 +660,35 @@ mod tests {
             .validate(&tol),
             Err(SegmentError::NonFinite)
         ));
+    }
+
+    #[test]
+    fn ellipse_bbox_is_exact() {
+        // Major (3, 4), minor (-1.6, 1.2): half-extents are √(3² + 1.6²) and √(4² + 1.2²).
+        let full = Segment::Ellipse {
+            center: Point2::new(1.0, 2.0),
+            major_axis: Vec2::new(3.0, 4.0),
+            ratio: 0.4,
+            start: 0.0,
+            end: TAU,
+            ccw: true,
+        };
+        let b = full.bbox(1.0);
+        let (hx, hy) = (11.56_f64.sqrt(), 17.44_f64.sqrt());
+        assert!(closep(b.min, Point2::new(1.0 - hx, 2.0 - hy)));
+        assert!(closep(b.max, Point2::new(1.0 + hx, 2.0 + hy)));
+        // Half an axis-aligned ellipse, from +x round through +y to −x.
+        let half = Segment::Ellipse {
+            center: Point2::ORIGIN,
+            major_axis: Vec2::new(2.0, 0.0),
+            ratio: 0.5,
+            start: 0.0,
+            end: PI,
+            ccw: true,
+        };
+        let b = half.bbox(1.0);
+        assert!(closep(b.min, Point2::new(-2.0, 0.0)));
+        assert!(closep(b.max, Point2::new(2.0, 1.0)));
     }
 
     #[test]
