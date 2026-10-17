@@ -94,24 +94,32 @@ fn build_model(soup: Soup, options: &ImportOptions) -> Result<SelectableModel, I
         })
         .collect();
 
-    // Flat-shaded render mesh: three vertices per triangle, the region's normal.
-    let n = mesh.triangles.len() * 3;
-    let (mut pos, mut nor, mut ids) = (
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-    );
-    for (t, f) in mesh.triangles.iter().zip(&mesh.triangle_face) {
+    // Flat-shaded render mesh, grouped by face so that each face's vertices are contiguous.
+    // Vertices are shared within a face (one normal per face) but never between faces.
+    let mut order: Vec<usize> = (0..mesh.triangles.len()).collect();
+    order.sort_by_key(|&t| mesh.triangle_face[t]);
+    let (mut pos, mut nor, mut ids, mut indices) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut local: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let mut current = None;
+    for t in order {
+        let f = mesh.triangle_face[t];
+        if current != Some(f) {
+            current = Some(f);
+            local.clear();
+        }
         let normal = mesh.planes.get(f.0 as usize).map_or(Vec3::Z, |p| p.normal);
-        for &v in t {
-            pos.push(mesh.positions[v as usize]);
-            nor.push(normal);
-            ids.push(*f);
+        for &v in &mesh.triangles[t] {
+            let next = u32::try_from(pos.len())
+                .map_err(|_| ImportError::Unsupported("mesh too large".into()))?;
+            let i = *local.entry(v).or_insert_with(|| {
+                pos.push(mesh.positions[v as usize]);
+                nor.push(normal);
+                ids.push(f);
+                next
+            });
+            indices.push(i);
         }
     }
-    let indices = (0..u32::try_from(n)
-        .map_err(|_| ImportError::Unsupported("mesh too large".into()))?)
-        .collect();
     Ok(SelectableModel {
         faces,
         mesh: RenderMesh::new(pos, nor, ids, indices)?,
@@ -137,6 +145,8 @@ f 1 4 3 2\nf 5 6 7 8\nf 1 2 6 5\nf 4 8 7 3\nf 1 5 8 4\nf 2 3 7 6\n";
         assert_eq!(m.faces.len(), 6);
         assert_eq!(m.units, LengthUnit::Unknown);
         assert_eq!(m.mesh.triangle_count(), 12);
+        // Four corners per face, shared within the face only.
+        assert_eq!(m.mesh.positions().len(), 24);
         assert!(m.faces.iter().all(|f| (f.area - 1.0).abs() < 1e-12));
     }
 
@@ -161,6 +171,72 @@ f 1 4 3 2\nf 5 6 7 8\nf 1 2 6 5\nf 4 8 7 3\nf 1 5 8 4\nf 2 3 7 6\n";
             StlImporter
                 .load(b"solid x\nendsolid\n", &ImportOptions::default())
                 .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod perf {
+    use super::*;
+    use std::time::Instant;
+
+    /// About a million triangles: a 500 × 500 grid box top and bottom plus walls, as a binary
+    /// STL. Run with `cargo test --release -p flatbello-import-mesh -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "performance check, run explicitly in release"]
+    fn million_triangles() {
+        let n = 500;
+        let mut tris: Vec<[[f32; 3]; 3]> = Vec::new();
+        for (z, flip) in [(0.0f32, true), (5.0, false)] {
+            for i in 0..n {
+                for j in 0..n {
+                    let (x0, y0) = (i as f32 * 0.2, j as f32 * 0.2);
+                    let (x1, y1) = (x0 + 0.2, y0 + 0.2);
+                    let mut a = [[x0, y0, z], [x1, y0, z], [x1, y1, z]];
+                    let mut b = [[x0, y0, z], [x1, y1, z], [x0, y1, z]];
+                    if flip {
+                        a.swap(1, 2);
+                        b.swap(1, 2);
+                    }
+                    tris.push(a);
+                    tris.push(b);
+                }
+            }
+        }
+        let mut bytes = vec![0u8; 80];
+        bytes.extend_from_slice(&(tris.len() as u32).to_le_bytes());
+        for t in &tris {
+            bytes.extend_from_slice(&[0; 12]);
+            for p in t {
+                for c in p {
+                    bytes.extend_from_slice(&c.to_le_bytes());
+                }
+            }
+            bytes.extend_from_slice(&[0, 0]);
+        }
+        let start = Instant::now();
+        let model = StlImporter.load(&bytes, &ImportOptions::default()).unwrap();
+        println!(
+            "{} triangles, {} faces: loaded in {:.2?}",
+            tris.len(),
+            model.faces.len(),
+            start.elapsed()
+        );
+        let ModelGeometry::Mesh(mesh) = &model.geometry else {
+            panic!("not a mesh")
+        };
+        let start = Instant::now();
+        let p = flatbello_extract::extract_mesh_face(
+            mesh,
+            FaceId(0),
+            model.units,
+            &flatbello_extract::ExtractOptions::default(),
+        )
+        .unwrap();
+        println!(
+            "extracted face 0 ({} edges) in {:.2?}",
+            p.outer().edges().len(),
+            start.elapsed()
         );
     }
 }

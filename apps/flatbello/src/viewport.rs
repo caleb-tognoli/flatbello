@@ -41,6 +41,11 @@ struct Mesh {
     /// The face of every vertex, to rebuild the state buffer.
     face_of_vertex: Vec<u32>,
     face_count: usize,
+    /// Each face's vertex range, when every face's vertices are contiguous (importers emit
+    /// them that way); lets a hover change rewrite only the faces that changed.
+    face_ranges: Option<Vec<std::ops::Range<u32>>>,
+    /// The state last uploaded for each face.
+    uploaded: std::cell::RefCell<Vec<u32>>,
     /// The bounding-box centre. Positions are uploaded relative to it to keep f32 precision.
     center: Point3,
     radius: f64,
@@ -253,6 +258,8 @@ impl Viewport {
             states,
             indices,
             index_count: u32::try_from(mesh.indices().len()).unwrap_or(0),
+            face_ranges: contiguous_ranges(&face_of_vertex, face_count),
+            uploaded: std::cell::RefCell::new(vec![0; face_count]),
             face_of_vertex,
             face_count,
             center,
@@ -267,6 +274,20 @@ impl Viewport {
         let per_face: Vec<u32> = (0..mesh.face_count)
             .map(|f| state(FaceId(f as u32)))
             .collect();
+        let mut uploaded = mesh.uploaded.borrow_mut();
+        if let Some(ranges) = &mesh.face_ranges {
+            for (f, range) in ranges.iter().enumerate() {
+                if per_face[f] != uploaded[f] && !range.is_empty() {
+                    let bytes: Vec<u8> =
+                        std::iter::repeat_n(per_face[f].to_le_bytes(), range.len())
+                            .flatten()
+                            .collect();
+                    queue.write_buffer(&mesh.states, u64::from(range.start) * 4, &bytes);
+                }
+            }
+            *uploaded = per_face;
+            return;
+        }
         let bytes: Vec<u8> = mesh
             .face_of_vertex
             .iter()
@@ -281,6 +302,7 @@ impl Viewport {
         if !bytes.is_empty() {
             queue.write_buffer(&mesh.states, 0, &bytes);
         }
+        *uploaded = per_face;
     }
 
     /// The camera that frames the current mesh.
@@ -522,4 +544,42 @@ fn read_buffer(device: &wgpu::Device, buffer: &wgpu::Buffer, len: u64) -> Option
     let data = slice.get_mapped_range().ok()?.to_vec();
     buffer.unmap();
     Some(data)
+}
+
+/// Each face's vertex range if every face's vertices form one contiguous run.
+fn contiguous_ranges(
+    face_of_vertex: &[u32],
+    face_count: usize,
+) -> Option<Vec<std::ops::Range<u32>>> {
+    let mut ranges = vec![0..0; face_count];
+    let mut seen = vec![false; face_count];
+    let mut start = 0;
+    for i in 1..=face_of_vertex.len() {
+        if i == face_of_vertex.len() || face_of_vertex[i] != face_of_vertex[start] {
+            let f = face_of_vertex[start] as usize;
+            if std::mem::replace(&mut seen[f], true) {
+                return None;
+            }
+            ranges[f] = u32::try_from(start).ok()?..u32::try_from(i).ok()?;
+            start = i;
+        }
+    }
+    Some(ranges)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_contiguous_face_ranges() {
+        assert_eq!(
+            contiguous_ranges(&[0, 0, 1, 1, 1, 2], 3),
+            Some(vec![0..2, 2..5, 5..6])
+        );
+        assert_eq!(contiguous_ranges(&[0, 1, 0], 2), None);
+        assert_eq!(contiguous_ranges(&[], 0), Some(vec![]));
+        // A face without vertices keeps an empty range.
+        assert_eq!(contiguous_ranges(&[0, 2], 3), Some(vec![0..1, 0..0, 1..2]));
+    }
 }

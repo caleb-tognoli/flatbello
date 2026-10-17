@@ -520,10 +520,13 @@ impl App {
                 .monospace()
                 .weak(),
         );
-        let faces = model.summary.faces.clone();
-        let mut clicked = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for f in &faces {
+        let faces = &model.summary.faces;
+        let selection = &self.selection;
+        let (mut clicked, mut hover) = (None, None);
+        // Only the visible rows are laid out: meshes can have hundreds of thousands of faces.
+        let row = ui.text_style_height(&egui::TextStyle::Monospace) + ui.spacing().item_spacing.y;
+        egui::ScrollArea::vertical().show_rows(ui, row, faces.len(), |ui, rows| {
+            for f in &faces[rows] {
                 let kind = match f.kind {
                     FaceKind::Planar => "flat",
                     FaceKind::Cylindrical => "cylinder",
@@ -531,17 +534,20 @@ impl App {
                 };
                 let text = format!("{:>4}  {kind:<8} {:>10.1}", f.id.0, f.area);
                 let r = ui.selectable_label(
-                    self.selection.contains(&f.id),
+                    selection.contains(&f.id),
                     egui::RichText::new(text).monospace(),
                 );
                 if r.clicked() {
                     clicked = Some((f.id, ui.input(|i| i.modifiers.command || i.modifiers.shift)));
                 }
                 if r.hovered() {
-                    self.list_hover = Some(f.id);
+                    hover = Some(f.id);
                 }
             }
         });
+        if hover.is_some() {
+            self.list_hover = hover;
+        }
         if let Some((f, add)) = clicked {
             self.click_face(Some(f), add);
         }
