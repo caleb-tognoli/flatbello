@@ -164,3 +164,24 @@ split in M5 only has to send plain data, and OCCT stays inside two crates.
   alternative is bundling a different font under a licence already allowed.
 - The cargo-deny graph is limited to desktop targets, so wasm-only dependencies (such as tokio through
   wasm-bindgen-futures) are not counted.
+
+## 2026-10-17 — Mesh input (M4)
+
+- Meshes are welded (1e-7 of the bounding-box diagonal) and split into planar regions when they load.
+  Each region is a selectable face, so picking, selection and export work the same as for STEP. Curved
+  surfaces become many thin flat faces (one per facet strip); they can be selected but are rarely useful.
+- Regions grow from the largest unassigned triangle; a neighbour joins when its normal is within the
+  angular tolerance of the refitted plane and its corners within the linear tolerance.
+- Fitting: whole loops of at least 6 points become a circle when every point is within the fit
+  tolerance. Otherwise runs grow greedily from the sharpest corner (or the start of the longest chord):
+  the longer of a line or an arc wins, and ties go to the line. Arcs need at least 4 points, at most 50°
+  per chord, one turning direction, and chords within 4× of each other, so a line next to an arc is
+  never swallowed by one flat circle.
+- Joints are moved onto the arcs that meet there (onto the intersection between two arcs). When two
+  fitted circles miss each other, a short line bridges them, so loops always close.
+- Without a chosen unit, mesh coordinates are read as millimetres and reported as unknown. The app asks
+  and reloads at the chosen scale. Snapping radii to standard hole sizes (an optional step in the plan)
+  is not implemented yet.
+- Results on the generated fixtures: plate with holes, slotted plate, asymmetric plate and L-bracket
+  reproduce the exact profiles at 0.1, 0.01 and 0.002 mm deflection, coarse included (same counts and
+  radii). The B-spline part's curve becomes 2–8 arcs plus short lines, within 0.01 mm of the outline.
