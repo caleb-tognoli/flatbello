@@ -1,0 +1,236 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1009
+  9
+$INSBASE
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  9
+$EXTMIN
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  9
+$EXTMAX
+ 10
+80.0
+ 20
+40.0
+ 30
+0.0
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LTYPE
+ 70
+1
+  0
+LTYPE
+  2
+CONTINUOUS
+ 70
+0
+  3
+Solid line
+ 72
+65
+ 73
+0
+ 40
+0.0
+  0
+ENDTAB
+  0
+TABLE
+  2
+LAYER
+ 70
+3
+  0
+LAYER
+  2
+0
+ 70
+0
+ 62
+7
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+CUT_OUTER
+ 70
+0
+ 62
+7
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+CUT_INNER
+ 70
+0
+ 62
+1
+  6
+CONTINUOUS
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+LINE
+  8
+CUT_OUTER
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+80.0
+ 21
+0.0
+ 31
+0.0
+  0
+LINE
+  8
+CUT_OUTER
+ 10
+80.0
+ 20
+0.0
+ 30
+0.0
+ 11
+80.0
+ 21
+40.0
+ 31
+0.0
+  0
+LINE
+  8
+CUT_OUTER
+ 10
+80.0
+ 20
+40.0
+ 30
+0.0
+ 11
+0.0
+ 21
+40.0
+ 31
+0.0
+  0
+LINE
+  8
+CUT_OUTER
+ 10
+0.0
+ 20
+40.0
+ 30
+0.0
+ 11
+0.0
+ 21
+0.0
+ 31
+0.0
+  0
+ARC
+  8
+CUT_INNER
+ 10
+25.0
+ 20
+20.0
+ 30
+0.0
+ 40
+4.0
+ 50
+90.0
+ 51
+270.0
+  0
+LINE
+  8
+CUT_INNER
+ 10
+25.0
+ 20
+24.0
+ 30
+0.0
+ 11
+55.0
+ 21
+24.0
+ 31
+0.0
+  0
+ARC
+  8
+CUT_INNER
+ 10
+55.0
+ 20
+20.0
+ 30
+0.0
+ 40
+4.0
+ 50
+270.0
+ 51
+90.0
+  0
+LINE
+  8
+CUT_INNER
+ 10
+55.0
+ 20
+16.0
+ 30
+0.0
+ 11
+25.0
+ 21
+16.0
+ 31
+0.0
+  0
+ENDSEC
+  0
+EOF
