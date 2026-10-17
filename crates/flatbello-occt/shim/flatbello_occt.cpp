@@ -119,7 +119,12 @@ template <typename F> int guard(F &&body) {
         return body();
     } catch (const Standard_Failure &e) {
         const char *msg = e.GetMessageString();
+#if OCC_VERSION_HEX < 0x080000
+        // Before OCCT 8.0 exceptions are transients and know their type name.
         return fail(FB_EOCCT, std::string(e.DynamicType()->Name()) + ": " + (msg ? msg : ""));
+#else
+        return fail(FB_EOCCT, std::string("OCCT exception: ") + (msg ? msg : ""));
+#endif
     } catch (const std::exception &e) {
         return fail(FB_EUNKNOWN, e.what());
     } catch (...) {

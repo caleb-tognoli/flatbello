@@ -93,7 +93,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: flatbello-windows-installer
-          path: target/release/*.exe
+          path: target/release/**/*setup*.exe
 
   macos:
     name: macOS .dmg
