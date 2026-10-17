@@ -38,6 +38,68 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features
 
+  # Windows and macOS are new: they report but do not block until they have run green.
+  macos:
+    name: macOS (Homebrew OCCT)
+    runs-on: macos-latest
+    continue-on-error: true
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install opencascade
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --all-features
+
+  windows:
+    name: Windows (vcpkg OCCT)
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 240
+    env:
+      VCPKG_TRIPLET: x64-windows-release
+    steps:
+      - uses: actions/checkout@v5
+      - name: Locate vcpkg
+        shell: pwsh
+        run: |
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          $occt = "$root\installed\$env:VCPKG_TRIPLET"
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          "OCCT_INCLUDE_DIR=$occt\include\opencascade" >> $env:GITHUB_ENV
+          "OCCT_LIB_DIR=$occt\lib" >> $env:GITHUB_ENV
+          "$occt\bin" >> $env:GITHUB_PATH
+      # Building OCCT takes a long time. The installed tree is cached right after the build,
+      # so that a later failure in this job does not throw the build away.
+      - id: occt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}\installed
+          key: vcpkg-opencascade-${{ env.VCPKG_TRIPLET }}-v1
+      - name: Install OCCT
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: '& "$env:VCPKG_ROOT\vcpkg.exe" install "opencascade:$env:VCPKG_TRIPLET"'
+      - if: steps.occt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}\installed
+          key: vcpkg-opencascade-${{ env.VCPKG_TRIPLET }}-v1
+      - name: List OCCT toolkits
+        shell: pwsh
+        run: Get-ChildItem $env:OCCT_LIB_DIR -Filter "TK*.lib" | Select-Object -ExpandProperty Name
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --all-features
+
   deny:
     name: licenses, bans, sources
     runs-on: ubuntu-latest

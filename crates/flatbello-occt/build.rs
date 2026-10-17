@@ -88,13 +88,32 @@ fn main() -> Result<(), String> {
     build.compile("flatbello_occt_shim");
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    let de = if (major, minor) >= (7, 8) {
-        DE_LIBS_NEW
+    let (preferred, other) = if (major, minor) >= (7, 8) {
+        (DE_LIBS_NEW, DE_LIBS_OLD)
     } else {
-        DE_LIBS_OLD
+        (DE_LIBS_OLD, DE_LIBS_NEW)
     };
-    for lib in de.iter().chain(COMMON_LIBS) {
-        println!("cargo:rustc-link-lib=dylib={lib}");
+    // Link the toolkits of the detected naming scheme that exist, plus any of the other
+    // scheme's that exist too, so a later rename does not silently drop a library.
+    let mut linked = Vec::new();
+    for lib in preferred.iter().chain(other).chain(COMMON_LIBS) {
+        if !linked.contains(lib) && library_exists(&lib_dir, lib) {
+            println!("cargo:rustc-link-lib=dylib={lib}");
+            linked.push(*lib);
+        }
+    }
+    let missing: Vec<&str> = COMMON_LIBS
+        .iter()
+        .chain(preferred.iter().filter(|l| **l != "TKDESTL" && **l != "TKSTL"))
+        .filter(|l| !linked.contains(l))
+        .copied()
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "OCCT {major}.{minor} in {} lacks {}",
+            lib_dir.display(),
+            missing.join(", ")
+        ));
     }
     Ok(())
 }
@@ -105,6 +124,16 @@ fn locate(var: &str, candidates: &[&str], ok: impl Fn(&Path) -> bool) -> Option<
         return Some(PathBuf::from(dir));
     }
     candidates.iter().map(PathBuf::from).find(|d| ok(d))
+}
+
+fn library_exists(dir: &Path, name: &str) -> bool {
+    [
+        format!("lib{name}.so"),
+        format!("lib{name}.dylib"),
+        format!("{name}.lib"),
+    ]
+    .iter()
+    .any(|f| dir.join(f).exists())
 }
 
 fn has_tkernel(dir: &Path) -> bool {
