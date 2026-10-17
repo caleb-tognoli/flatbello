@@ -7,7 +7,7 @@ use flatbello_core::{
     ExportError, ExportOptions, Exporter, Face, FaceId, ImportError, ImportOptions, Importer,
     ModelGeometry, Profile2D, RenderMesh, SelectableModel, layout_side_by_side,
 };
-use flatbello_export_dxf::DxfR12Exporter;
+use flatbello_export_dxf::{DxfR12Exporter, DxfR2000Exporter};
 use flatbello_export_svg::SvgExporter;
 use flatbello_extract::{ExtractError, extract_mesh_face, extract_planar};
 use flatbello_import_mesh::{ObjImporter, StlImporter};
@@ -15,7 +15,8 @@ use flatbello_import_step::{IgesImporter, StepImporter};
 
 pub use flatbello_extract::{ExtractOptions, XAxisRule};
 
-static EXPORTERS: [&dyn Exporter; 2] = [&DxfR12Exporter, &SvgExporter];
+/// The first exporter of each kind is the default for it: DXF R2000 before R12.
+static EXPORTERS: [&dyn Exporter; 3] = [&DxfR2000Exporter, &DxfR12Exporter, &SvgExporter];
 static IMPORTERS: [&dyn Importer; 4] = [&StepImporter, &IgesImporter, &StlImporter, &ObjImporter];
 
 #[derive(Debug)]
@@ -238,6 +239,7 @@ mod tests {
         let direct = flatbello_export_svg::write_svg(&p, &opts).unwrap();
         assert_eq!(svg, direct.into_bytes());
         assert!(export(&p, "dxf-r12", &opts).is_ok());
+        assert!(export(&p, "dxf-r2000", &opts).is_ok());
         assert!(matches!(
             export(&p, "pdf", &opts),
             Err(EngineError::UnknownFormat(_))

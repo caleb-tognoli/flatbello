@@ -12,9 +12,12 @@ usage: flatbello-cli <command>
 
 commands:
   faces <model>            list the faces of a STEP or IGES model
-  export <model> --face <n> [--face <n> ...] [--format dxf|svg] [--x-axis longest|plane]
-         -o <file>         write the profiles of the given faces, side by side
-                           (default format: dxf, which is DXF R12 in millimetres)
+  export <model> --face <n> [--face <n> ...] [--format dxf|dxf-r12|svg]
+         [--x-axis longest|plane] [--native-curves] [--closed-polylines] -o <file>
+                           write the profiles of the given faces, side by side, in mm.
+                           dxf is DXF R2000. --native-curves keeps ellipses and splines
+                           (R2000 only); --closed-polylines writes each loop as one closed
+                           LWPOLYLINE with arc bulges (R2000 only)
   demo-export [-o <dir>]   write demo.dxf (R12) and demo.svg: a 100 x 60 mm plate with
                            5 mm corner radii and two round holes (default dir: .)
   help                     show this message";
@@ -76,7 +79,9 @@ fn faces(args: &[String]) -> Result<(), String> {
 fn export(args: &[String]) -> Result<(), String> {
     let mut model: Option<&str> = None;
     let mut faces: Vec<FaceId> = Vec::new();
-    let mut format = "dxf-r12";
+    let mut format = "dxf-r2000";
+    let mut native_curves = false;
+    let mut loops_as_polylines = false;
     let mut out: Option<&str> = None;
     let mut x_axis = XAxisRule::LongestStraightEdge;
     let mut it = args.iter().map(String::as_str);
@@ -91,7 +96,8 @@ fn export(args: &[String]) -> Result<(), String> {
             }
             "--format" => {
                 format = match value()? {
-                    "dxf" | "dxf-r12" => "dxf-r12",
+                    "dxf" | "dxf-r2000" => "dxf-r2000",
+                    "dxf-r12" => "dxf-r12",
                     "svg" => "svg",
                     other => return Err(format!("unknown format \"{other}\"")),
                 }
@@ -103,6 +109,8 @@ fn export(args: &[String]) -> Result<(), String> {
                     other => return Err(format!("unknown x-axis rule \"{other}\"")),
                 }
             }
+            "--native-curves" => native_curves = true,
+            "--closed-polylines" => loops_as_polylines = true,
             "-o" => out = Some(value()?),
             _ if model.is_none() && !arg.starts_with('-') => model = Some(arg),
             _ => return Err(format!("unexpected argument \"{arg}\"\n\n{USAGE}")),
@@ -123,7 +131,11 @@ fn export(args: &[String]) -> Result<(), String> {
             &faces,
             &ExtractOptions { tolerance, x_axis },
             format,
-            &ExportOptions { tolerance },
+            &ExportOptions {
+                tolerance,
+                native_curves,
+                loops_as_polylines,
+            },
         )
         .map_err(|e| e.to_string())?;
     write_file(Path::new(out), &bytes)

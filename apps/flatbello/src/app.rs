@@ -25,6 +25,7 @@ const UNIT_CHOICES: [(LengthUnit, &str); 4] = [
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
+    DxfR2000,
     DxfR12,
     Svg,
 }
@@ -32,6 +33,7 @@ pub enum Format {
 impl Format {
     fn id(self) -> &'static str {
         match self {
+            Format::DxfR2000 => "dxf-r2000",
             Format::DxfR12 => "dxf-r12",
             Format::Svg => "svg",
         }
@@ -39,13 +41,14 @@ impl Format {
 
     fn extension(self) -> &'static str {
         match self {
-            Format::DxfR12 => "dxf",
+            Format::DxfR2000 | Format::DxfR12 => "dxf",
             Format::Svg => "svg",
         }
     }
 
     fn label(self) -> &'static str {
         match self {
+            Format::DxfR2000 => "DXF (R2000)",
             Format::DxfR12 => "DXF R12",
             Format::Svg => "SVG",
         }
@@ -90,6 +93,8 @@ pub struct App {
     pub camera: Camera,
     preview: Result<Vec<Profile2D>, String>,
     format: Format,
+    native_curves: bool,
+    closed_polylines: bool,
     x_axis: XAxisRule,
     one_file_per_face: bool,
     status: String,
@@ -116,7 +121,9 @@ impl Default for App {
             hovered: None,
             camera: Camera::default(),
             preview: Ok(Vec::new()),
-            format: Format::DxfR12,
+            format: Format::DxfR2000,
+            native_curves: false,
+            closed_polylines: false,
             x_axis: XAxisRule::LongestStraightEdge,
             one_file_per_face: false,
             status: "Open a STEP or IGES model, or drop one on the window.".into(),
@@ -351,6 +358,8 @@ impl App {
         };
         let options = ExportOptions {
             tolerance: self.tolerance,
+            native_curves: self.native_curves,
+            loops_as_polylines: self.closed_polylines,
         };
         let id = model.id;
         let jobs: Vec<(PathBuf, Vec<FaceId>)> =
@@ -451,10 +460,18 @@ impl App {
         egui::ComboBox::from_label("Format")
             .selected_text(self.format.label())
             .show_ui(ui, |ui| {
-                for f in [Format::DxfR12, Format::Svg] {
+                for f in [Format::DxfR2000, Format::DxfR12, Format::Svg] {
                     ui.selectable_value(&mut self.format, f, f.label());
                 }
             });
+        if self.format == Format::DxfR2000 {
+            ui.checkbox(&mut self.closed_polylines, "Loops as closed polylines")
+                .on_hover_text(
+                    "Each outline and hole becomes one closed LWPOLYLINE; arcs become bulges.",
+                );
+            ui.checkbox(&mut self.native_curves, "Keep splines and ellipses")
+                .on_hover_text("Off: curves other than arcs are written as polylines, which every cutter reads.");
+        }
         ui.label("X axis");
         let before = self.x_axis;
         ui.radio_value(

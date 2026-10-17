@@ -1,8 +1,14 @@
-//! Hand-written DXF writer.
+//! Hand-written DXF writers.
 //!
-//! R12 (`AC1009`) text DXF with `LINE`, `ARC`, `CIRCLE`, and `POLYLINE` for curves R12 cannot
+//! [`write_r2000`] (`AC1015`, the default) and [`write_r12`] (`AC1009`) for older software.
+//!
+//! R12 text DXF with `LINE`, `ARC`, `CIRCLE`, and `POLYLINE` for curves R12 cannot
 //! represent. R12 has no units header: coordinates are millimetres. Outer loops go on layer
 //! `CUT_OUTER`, holes on `CUT_INNER`. All entities lie at z = 0.
+
+mod r2000;
+
+pub use r2000::{DxfR2000Exporter, write_r2000};
 
 use flatbello_core::angle::normalize_angle;
 use flatbello_core::format::{DECIMALS, fixed};
@@ -15,7 +21,7 @@ pub const LAYER_INNER: &str = "CUT_INNER";
 
 /// Layer name and ACI colour. Distinct colours let cutter software map outer and inner cuts to
 /// different settings or cut order.
-const LAYERS: [(&str, u8); 3] = [("0", 7), (LAYER_OUTER, 7), (LAYER_INNER, 1)];
+pub(crate) const LAYERS: [(&str, u8); 3] = [("0", 7), (LAYER_OUTER, 7), (LAYER_INNER, 1)];
 
 pub struct DxfR12Exporter;
 
@@ -42,41 +48,41 @@ impl Exporter for DxfR12Exporter {
 }
 
 /// Accumulates group-code/value pairs: the code right-aligned in three columns, CRLF line ends.
-struct Dxf {
-    out: String,
+pub(crate) struct Dxf {
+    pub(crate) out: String,
 }
 
 impl Dxf {
-    fn pair(&mut self, code: u16, value: &str) {
+    pub(crate) fn pair(&mut self, code: u16, value: &str) {
         self.out.push_str(&format!("{code:>3}\r\n{value}\r\n"));
     }
 
-    fn real(&mut self, code: u16, value: f64) {
+    pub(crate) fn real(&mut self, code: u16, value: f64) {
         self.pair(code, &fixed(value, DECIMALS));
     }
 
-    fn int(&mut self, code: u16, value: i32) {
+    pub(crate) fn int(&mut self, code: u16, value: i32) {
         self.pair(code, &value.to_string());
     }
 
     /// A point as codes `base`, `base + 10` and `base + 20` (x, y, z = 0).
-    fn point(&mut self, base: u16, p: Point2) {
+    pub(crate) fn point(&mut self, base: u16, p: Point2) {
         self.real(base, p.x);
         self.real(base + 10, p.y);
         self.real(base + 20, 0.0);
     }
 
-    fn header_point(&mut self, name: &str, p: Point2) {
+    pub(crate) fn header_point(&mut self, name: &str, p: Point2) {
         self.pair(9, name);
         self.point(10, p);
     }
 
-    fn begin_section(&mut self, name: &str) {
+    pub(crate) fn begin_section(&mut self, name: &str) {
         self.pair(0, "SECTION");
         self.pair(2, name);
     }
 
-    fn end_section(&mut self) {
+    pub(crate) fn end_section(&mut self) {
         self.pair(0, "ENDSEC");
     }
 }
@@ -191,7 +197,7 @@ fn write_loop(d: &mut Dxf, l: &Loop, layer: &str, tol: &Tolerance) {
 }
 
 /// An angle in degrees in [0, 360), with values that would print as 360 written as 0.
-fn degrees(radians: f64) -> f64 {
+pub(crate) fn degrees(radians: f64) -> f64 {
     let d = normalize_angle(radians).to_degrees();
     if d < 360.0 - 0.5e-6 { d } else { 0.0 }
 }

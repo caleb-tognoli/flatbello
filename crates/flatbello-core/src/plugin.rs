@@ -51,6 +51,12 @@ pub trait Importer: Send + Sync {
 pub struct ExportOptions {
     /// Ellipses and splines that a format cannot represent are flattened within `tolerance.fit()`.
     pub tolerance: Tolerance,
+    /// Write ellipses and splines as native curves where the format has them (DXF R2000
+    /// `ELLIPSE` and `SPLINE`). Off by default: many cutters handle only lines and arcs.
+    pub native_curves: bool,
+    /// Write each loop as one closed polyline, arcs as bulges, where the format supports it
+    /// (DXF R2000 `LWPOLYLINE`). Off by default.
+    pub loops_as_polylines: bool,
 }
 
 #[derive(Clone, Debug)]

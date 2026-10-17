@@ -61,3 +61,24 @@ fn two_plates_side_by_side() {
     let dxf = write_r12(&laid, &ExportOptions::default()).unwrap();
     check_golden("two_plates_r12.dxf", &dxf);
 }
+
+#[test]
+fn rounded_plate_r2000() {
+    let dxf = flatbello_export_dxf::write_r2000(
+        &[sample::rounded_plate().unwrap()],
+        &ExportOptions::default(),
+    )
+    .unwrap();
+    check_golden("rounded_plate_r2000.dxf", &dxf);
+}
+
+#[test]
+fn slotted_plate_r2000_closed_polylines() {
+    let options = ExportOptions {
+        loops_as_polylines: true,
+        ..ExportOptions::default()
+    };
+    let dxf =
+        flatbello_export_dxf::write_r2000(&[sample::slotted_plate().unwrap()], &options).unwrap();
+    check_golden("slotted_plate_r2000_polylines.dxf", &dxf);
+}
