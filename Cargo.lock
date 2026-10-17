@@ -13,6 +13,7 @@ dependencies = [
 name = "flatbello-cli"
 version = "0.1.0"
 dependencies = [
+ "flatbello-core",
  "flatbello-engine",
 ]
 
