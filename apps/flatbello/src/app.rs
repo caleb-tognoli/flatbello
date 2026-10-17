@@ -2,15 +2,14 @@
 //! egui texture provided by the caller, which in turn reads back what the UI requested.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::mpsc::{Receiver, TryRecvError};
 
 use egui::{Color32, Pos2, Rect, Sense, Ui, Vec2};
-use flatbello_core::{
-    ExportOptions, FaceId, FaceKind, ImportOptions, LengthUnit, Point3, Profile2D, SelectableModel,
-    Tolerance, layout_side_by_side,
-};
-use flatbello_engine::{Engine, ExtractOptions, LAYOUT_GAP, ModelId, XAxisRule};
+use flatbello_core::{FaceId, FaceKind, LengthUnit, Point3, Profile2D, RenderMesh, Tolerance};
+use flatbello_engine::XAxisRule;
+use flatbello_engine::wire::{ModelSummary, Request, Response, Settings};
 
+use crate::backend::{Backend, Crashed, Job, Reply};
 use crate::camera::Camera;
 use crate::preview;
 
@@ -56,16 +55,16 @@ impl Format {
 }
 
 struct Loaded {
-    id: ModelId,
     name: String,
     stem: String,
+    summary: ModelSummary,
 }
 
 /// A model being imported on a background thread.
 struct Loading {
     name: String,
     path: PathBuf,
-    result: Receiver<Result<SelectableModel, String>>,
+    result: Receiver<Reply>,
 }
 
 /// Asks which unit a unitless file (STL, OBJ) is in. `size` is the bounding box in file units.
@@ -84,7 +83,7 @@ pub struct ViewRequest {
 }
 
 pub struct App {
-    engine: Engine,
+    backend: Backend,
     model: Option<Loaded>,
     loading: Option<Loading>,
     units_prompt: Option<UnitsPrompt>,
@@ -99,8 +98,8 @@ pub struct App {
     one_file_per_face: bool,
     status: String,
     tolerance: Tolerance,
-    /// A model arrived and its mesh must be uploaded.
-    pub new_mesh: Option<ModelId>,
+    /// A model arrived (or went away) and the 3D view must be rebuilt.
+    pub new_mesh: bool,
     /// Hover or selection changed and the face highlight must be updated.
     pub states_dirty: bool,
     /// The view should be reset to frame the model.
@@ -111,9 +110,16 @@ pub struct App {
 }
 
 impl Default for App {
+    /// An app whose engine runs in this process.
     fn default() -> Self {
+        App::new(Backend::in_process())
+    }
+}
+
+impl App {
+    pub fn new(backend: Backend) -> Self {
         App {
-            engine: Engine::new(),
+            backend,
             model: None,
             loading: None,
             units_prompt: None,
@@ -126,9 +132,9 @@ impl Default for App {
             closed_polylines: false,
             x_axis: XAxisRule::LongestStraightEdge,
             one_file_per_face: false,
-            status: "Open a STEP or IGES model, or drop one on the window.".into(),
+            status: "Open a STEP, IGES, STL or OBJ model, or drop one on the window.".into(),
             tolerance: Tolerance::default(),
-            new_mesh: None,
+            new_mesh: false,
             states_dirty: false,
             reset_camera: false,
             view: ViewRequest::default(),
@@ -138,8 +144,32 @@ impl Default for App {
 }
 
 impl App {
-    pub fn engine(&self) -> &Engine {
-        &self.engine
+    /// The open model's render mesh.
+    pub fn mesh(&self) -> Option<&RenderMesh> {
+        self.model.as_ref().map(|m| &m.summary.mesh)
+    }
+
+    /// The engine stopped: forget the model it held and say so.
+    fn engine_crashed(&mut self, Crashed(why): Crashed, doing: &str) {
+        if self.model.take().is_some() {
+            self.new_mesh = true;
+        }
+        self.selection.clear();
+        self.hovered = None;
+        self.preview = Ok(Vec::new());
+        self.states_dirty = true;
+        self.status = format!(
+            "The engine crashed while {doing} ({why}). It has been restarted; open the file again."
+        );
+    }
+
+    fn settings(&self) -> Settings {
+        Settings {
+            tolerance: self.tolerance,
+            x_axis: self.x_axis,
+            native_curves: self.native_curves,
+            loops_as_polylines: self.closed_polylines,
+        }
     }
 
     pub fn is_busy(&self) -> bool {
@@ -170,34 +200,12 @@ impl App {
             || path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        let (tx, rx) = mpsc::channel();
-        let hint = name.clone();
-        let source = path.clone();
-        let options = ImportOptions {
+        let result = self.backend.send(Job::Open {
+            path: path.clone(),
             units,
-            ..ImportOptions::default()
-        };
-        let spawned = std::thread::Builder::new()
-            .name("flatbello-import".into())
-            .spawn(move || {
-                let result = std::fs::read(&path)
-                    .map_err(|e| format!("reading {}: {e}", path.display()))
-                    .and_then(|bytes| {
-                        flatbello_engine::import(&bytes, &hint, &options).map_err(|e| e.to_string())
-                    });
-                let _ = tx.send(result);
-            });
-        match spawned {
-            Ok(_) => {
-                self.status = format!("Loading {name}…");
-                self.loading = Some(Loading {
-                    name,
-                    path: source,
-                    result: rx,
-                });
-            }
-            Err(e) => self.status = format!("Could not start loading: {e}"),
-        }
+        });
+        self.status = format!("Loading {name}…");
+        self.loading = Some(Loading { name, path, result });
     }
 
     /// Takes a finished background load, if any.
@@ -208,37 +216,38 @@ impl App {
         let result = match loading.result.try_recv() {
             Ok(r) => r,
             Err(TryRecvError::Empty) => return,
-            Err(TryRecvError::Disconnected) => Err("the loader stopped unexpectedly".into()),
+            Err(TryRecvError::Disconnected) => Err(Crashed("no reply".into())),
         };
         let (name, path) = (loading.name.clone(), loading.path.clone());
         self.loading = None;
-        match result.and_then(|m| self.engine.insert(m).map_err(|e| e.to_string())) {
-            Ok(id) => {
-                if let Some(old) = self.model.take() {
-                    self.engine.close(old.id);
-                }
+        match result {
+            Ok(Response::Opened(summary)) => {
                 let stem = Path::new(&name)
                     .file_stem()
                     .map_or_else(|| "profile".into(), |s| s.to_string_lossy().into_owned());
-                let faces = self.engine.faces(id).map_or(0, <[_]>::len);
+                let faces = summary.faces.len();
                 self.status = format!("{name}: {faces} faces. Click a flat face to select it.");
-                if let Ok(m) = self.engine.model(id)
-                    && m.units == LengthUnit::Unknown
-                {
+                if summary.units == LengthUnit::Unknown {
                     self.units_prompt = Some(UnitsPrompt {
                         path,
-                        size: extent(m.mesh.positions()),
+                        size: extent(summary.mesh.positions()),
                         choice: LengthUnit::Millimetre,
                     });
                 }
-                self.model = Some(Loaded { id, name, stem });
+                self.model = Some(Loaded {
+                    name,
+                    stem,
+                    summary,
+                });
                 self.selection.clear();
                 self.hovered = None;
-                self.new_mesh = Some(id);
+                self.new_mesh = true;
                 self.states_dirty = true;
                 self.update_preview();
             }
-            Err(e) => self.status = format!("Could not open {name}: {e}"),
+            Ok(Response::Error(e)) => self.status = format!("Could not open {name}: {e}"),
+            Ok(_) => self.status = format!("Could not open {name}: unexpected reply"),
+            Err(crash) => self.engine_crashed(crash, &format!("opening {name}")),
         }
     }
 
@@ -280,29 +289,30 @@ impl App {
         }
     }
 
-    fn extract_options(&self) -> ExtractOptions {
-        ExtractOptions {
-            tolerance: self.tolerance,
-            x_axis: self.x_axis,
-        }
-    }
-
     fn update_preview(&mut self) {
-        self.preview = match &self.model {
-            Some(m) if !self.selection.is_empty() => self
-                .engine
-                .extract(m.id, &self.selection, &self.extract_options())
-                .map(|p| layout_side_by_side(&p, LAYOUT_GAP, &self.tolerance))
-                .map_err(|e| e.to_string()),
-            _ => Ok(Vec::new()),
-        };
         self.states_dirty = true;
+        if self.model.is_none() || self.selection.is_empty() {
+            self.preview = Ok(Vec::new());
+            return;
+        }
+        let request = Request::Extract {
+            faces: self.selection.clone(),
+            settings: self.settings(),
+        };
+        self.preview = match self.backend.call(request) {
+            Ok(Response::Profiles(p)) => Ok(p),
+            Ok(Response::Error(e)) => Err(e),
+            Ok(_) => Err("unexpected reply".into()),
+            Err(crash) => {
+                self.engine_crashed(crash, "extracting faces");
+                Ok(Vec::new())
+            }
+        };
     }
 
     fn face_kind(&self, f: FaceId) -> Option<FaceKind> {
         let m = self.model.as_ref()?;
-        let faces = self.engine.faces(m.id).ok()?;
-        faces.iter().find(|x| x.id == f).map(|x| x.kind)
+        m.summary.faces.iter().find(|x| x.id == f).map(|x| x.kind)
     }
 
     /// Adds faces to the selection, as clicking them with Shift would.
@@ -356,12 +366,12 @@ impl App {
         else {
             return;
         };
-        let options = ExportOptions {
-            tolerance: self.tolerance,
-            native_curves: self.native_curves,
-            loops_as_polylines: self.closed_polylines,
-        };
-        let id = model.id;
+        self.export_to(path);
+    }
+
+    /// Writes the selection to `path`, or one file per face next to it.
+    fn export_to(&mut self, path: PathBuf) {
+        let ext = self.format.extension();
         let jobs: Vec<(PathBuf, Vec<FaceId>)> =
             if self.one_file_per_face && self.selection.len() > 1 {
                 let stem = path
@@ -381,19 +391,22 @@ impl App {
             };
         let mut written = Vec::new();
         for (path, faces) in jobs {
-            let result = self
-                .engine
-                .export_faces(
-                    id,
-                    &faces,
-                    &self.extract_options(),
-                    self.format.id(),
-                    &options,
-                )
-                .map_err(|e| e.to_string())
-                .and_then(|bytes| {
+            let request = Request::Export {
+                faces,
+                format: self.format.id().into(),
+                settings: self.settings(),
+            };
+            let result = match self.backend.call(request) {
+                Ok(Response::Exported(bytes)) => {
                     std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))
-                });
+                }
+                Ok(Response::Error(e)) => Err(e),
+                Ok(_) => Err("unexpected reply".into()),
+                Err(crash) => {
+                    self.engine_crashed(crash, "exporting");
+                    return;
+                }
+            };
             match result {
                 Ok(()) => written.push(path.display().to_string()),
                 Err(e) => {
@@ -507,11 +520,7 @@ impl App {
                 .monospace()
                 .weak(),
         );
-        let faces: Vec<_> = self
-            .engine
-            .faces(model.id)
-            .map(<[_]>::to_vec)
-            .unwrap_or_default();
+        let faces = model.summary.faces.clone();
         let mut clicked = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for f in &faces {
@@ -610,6 +619,8 @@ fn extent(points: &[Point3]) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flatbello_core::{ImportOptions, layout_side_by_side};
+    use flatbello_engine::{Engine, ExtractOptions, LAYOUT_GAP};
 
     fn fixture(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -617,29 +628,39 @@ mod tests {
             .join(name)
     }
 
-    fn loaded(name: &str) -> App {
-        let mut app = App::default();
-        app.open_path(fixture(name));
+    fn wait(app: &mut App) {
         while app.is_busy() {
             std::thread::sleep(std::time::Duration::from_millis(5));
             app.poll_loading();
         }
+    }
+
+    fn loaded(name: &str) -> App {
+        let mut app = App::default();
+        app.open_path(fixture(name));
+        wait(&mut app);
         assert!(app.model.is_some(), "{}", app.status);
         app
+    }
+
+    fn faces(app: &App, kind: FaceKind) -> Vec<FaceId> {
+        app.model
+            .as_ref()
+            .unwrap()
+            .summary
+            .faces
+            .iter()
+            .filter(|f| f.kind == kind)
+            .map(|f| f.id)
+            .collect()
     }
 
     #[test]
     fn loads_in_the_background_and_selects_faces() {
         let mut app = loaded("plate_holes.step");
-        assert!(app.new_mesh.is_some());
-        let planar = app
-            .engine
-            .faces(app.model.as_ref().unwrap().id)
-            .unwrap()
-            .iter()
-            .filter(|f| f.kind == FaceKind::Planar)
-            .map(|f| f.id)
-            .collect::<Vec<_>>();
+        assert!(app.new_mesh);
+        assert!(app.mesh().is_some_and(|m| m.triangle_count() > 0));
+        let planar = faces(&app, FaceKind::Planar);
         app.click_face(Some(planar[0]), false);
         assert_eq!(app.selection, vec![planar[0]]);
         assert_eq!(app.face_state(planar[0]), 2);
@@ -655,39 +676,30 @@ mod tests {
     #[test]
     fn curved_faces_are_not_selectable() {
         let mut app = loaded("plate_holes.step");
-        let cyl = app
-            .engine
-            .faces(app.model.as_ref().unwrap().id)
-            .unwrap()
-            .iter()
-            .find(|f| f.kind == FaceKind::Cylindrical)
-            .unwrap()
-            .id;
+        let cyl = faces(&app, FaceKind::Cylindrical)[0];
         app.click_face(Some(cyl), false);
         assert!(app.selection.is_empty());
         assert!(app.status.contains("curved"));
     }
 
+    /// The same faces through a separate engine, as the CLI would extract them.
+    fn engine_for(name: &str) -> (Engine, flatbello_engine::ModelId) {
+        let mut e = Engine::new();
+        let bytes = std::fs::read(fixture(name)).unwrap();
+        let id = e.open(&bytes, name, &ImportOptions::default()).unwrap();
+        (e, id)
+    }
+
     #[test]
     fn preview_matches_export_layout() {
         let mut app = loaded("plate_slots.step");
-        let id = app.model.as_ref().unwrap().id;
-        let planar: Vec<FaceId> = app
-            .engine
-            .faces(id)
-            .unwrap()
-            .iter()
-            .filter(|f| f.kind == FaceKind::Planar)
-            .map(|f| f.id)
-            .take(2)
-            .collect();
+        let planar: Vec<FaceId> = faces(&app, FaceKind::Planar).into_iter().take(2).collect();
         for f in &planar {
             app.click_face(Some(*f), true);
         }
+        let (e, id) = engine_for("plate_slots.step");
         let expected = layout_side_by_side(
-            &app.engine
-                .extract(id, &planar, &app.extract_options())
-                .unwrap(),
+            &e.extract(id, &planar, &ExtractOptions::default()).unwrap(),
             LAYOUT_GAP,
             &app.tolerance,
         );
@@ -699,11 +711,28 @@ mod tests {
         }
     }
 
-    fn wait(app: &mut App) {
-        while app.is_busy() {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-            app.poll_loading();
-        }
+    #[test]
+    fn export_matches_the_cli() {
+        let mut app = loaded("plate_holes.step");
+        let face = faces(&app, FaceKind::Planar)[0];
+        app.click_face(Some(face), false);
+        let dir = std::env::temp_dir().join(format!("flatbello-app-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("face.dxf");
+        app.export_to(out.clone());
+        let written = std::fs::read(&out).unwrap();
+        let (e, id) = engine_for("plate_holes.step");
+        let cli = e
+            .export_faces(
+                id,
+                &[face],
+                &ExtractOptions::default(),
+                "dxf-r2000",
+                &flatbello_core::ExportOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(written, cli);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -711,22 +740,23 @@ mod tests {
         let mut app = loaded("plate_holes_medium.stl");
         let prompt = app.units_prompt.as_ref().expect("a units prompt");
         assert!((prompt.size[0] - 100.0).abs() < 1e-3 && (prompt.size[1] - 60.0).abs() < 1e-3);
-        let id = app.model.as_ref().unwrap().id;
-        let area_mm = app
-            .engine
-            .faces(id)
-            .unwrap()
-            .iter()
-            .map(|f| f.area)
-            .fold(0.0, f64::max);
+        let max_area = |app: &App| {
+            app.model
+                .as_ref()
+                .unwrap()
+                .summary
+                .faces
+                .iter()
+                .map(|f| f.area)
+                .fold(0.0, f64::max)
+        };
+        let area_mm = max_area(&app);
         app.confirm_units(LengthUnit::Inch);
         assert!(app.units_prompt.is_none());
         wait(&mut app);
-        let m = app.engine.model(app.model.as_ref().unwrap().id).unwrap();
-        assert_eq!(m.units, LengthUnit::Inch);
+        assert_eq!(app.model.as_ref().unwrap().summary.units, LengthUnit::Inch);
         assert!(app.units_prompt.is_none(), "units are known now");
-        let area_in = m.faces.iter().map(|f| f.area).fold(0.0, f64::max);
-        assert!((area_in / area_mm - 25.4 * 25.4).abs() < 1e-6);
+        assert!((max_area(&app) / area_mm - 25.4 * 25.4).abs() < 1e-6);
     }
 
     #[test]
@@ -739,10 +769,7 @@ mod tests {
     fn bad_files_report_errors() {
         let mut app = App::default();
         app.open_path(PathBuf::from("/definitely/missing.step"));
-        while app.is_busy() {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-            app.poll_loading();
-        }
+        wait(&mut app);
         assert!(app.model.is_none());
         assert!(app.status.starts_with("Could not open"), "{}", app.status);
     }

@@ -22,7 +22,7 @@ pub struct FrameOutput {
 }
 
 impl Shell {
-    pub fn new(gpu: &Gpu, target_format: wgpu::TextureFormat) -> Shell {
+    pub fn new(gpu: &Gpu, target_format: wgpu::TextureFormat, app: App) -> Shell {
         Shell {
             ctx: egui::Context::default(),
             renderer: egui_wgpu::Renderer::new(
@@ -32,7 +32,7 @@ impl Shell {
             ),
             viewport: Viewport::new(&gpu.device),
             view_texture: None,
-            app: App::default(),
+            app,
         }
     }
 
@@ -46,9 +46,9 @@ impl Shell {
     ) -> FrameOutput {
         let (device, queue) = (&gpu.device, &gpu.queue);
         self.app.poll_loading();
-        if let Some(id) = self.app.new_mesh.take()
-            && let Ok(mesh) = self.app.engine().render_mesh(id)
-        {
+        if std::mem::take(&mut self.app.new_mesh) {
+            let empty = flatbello_core::RenderMesh::default();
+            let mesh = self.app.mesh().unwrap_or(&empty);
             self.app.camera = self.viewport.set_mesh(device, queue, mesh);
         }
         if std::mem::take(&mut self.app.reset_camera)

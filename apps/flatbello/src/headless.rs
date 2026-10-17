@@ -98,7 +98,7 @@ pub fn ui_snapshot(model_path: &str, out: &str, faces: &[String]) -> Result<(), 
         ..Default::default()
     };
 
-    let mut shell = Shell::new(&gpu, viewport::COLOR_FORMAT);
+    let mut shell = Shell::new(&gpu, viewport::COLOR_FORMAT, crate::app::App::default());
     shell.app.open_path(model_path.into());
     while shell.app.is_busy() {
         std::thread::sleep(std::time::Duration::from_millis(10));

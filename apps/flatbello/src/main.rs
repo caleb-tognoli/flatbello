@@ -1,6 +1,7 @@
 //! Flatbello desktop application (egui + wgpu).
 
 mod app;
+mod backend;
 mod bmp;
 mod camera;
 mod gpu;
@@ -18,6 +19,8 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
+use app::App;
+use backend::Backend;
 use gpu::Gpu;
 use shell::Shell;
 
@@ -28,6 +31,10 @@ const USAGE: &str = "usage: flatbello [model]
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.as_slice() {
+        [flag] if flag == "--worker" => {
+            flatbello_engine::wire::serve(std::io::stdin().lock(), std::io::stdout().lock())
+                .map_err(|e| format!("worker: {e}"))
+        }
         [flag, model, prefix] if flag == "--render-test" => headless::run(model, prefix),
         [flag, model, out, faces @ ..] if flag == "--ui-snapshot" => {
             headless::ui_snapshot(model, out, faces)
@@ -106,7 +113,12 @@ impl Running {
         config.present_mode = wgpu::PresentMode::AutoVsync;
         surface.configure(&gpu.device, &config);
 
-        let shell = Shell::new(&gpu, format);
+        // The engine runs in a worker process unless FLATBELLO_IN_PROCESS is set (for debugging).
+        let backend = match std::env::current_exe() {
+            Ok(exe) if std::env::var_os("FLATBELLO_IN_PROCESS").is_none() => Backend::worker(exe),
+            _ => Backend::in_process(),
+        };
+        let shell = Shell::new(&gpu, format, App::new(backend));
         let egui_state = egui_winit::State::new(
             shell.ctx.clone(),
             egui::ViewportId::ROOT,
