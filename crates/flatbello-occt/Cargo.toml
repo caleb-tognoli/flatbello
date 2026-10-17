@@ -11,6 +11,9 @@ fixtures = []
 [dependencies]
 flatbello-core.workspace = true
 
+[build-dependencies]
+cc = { version = "1.2", default-features = false }
+
 # Mirrors [workspace.lints] except `unsafe_code`: this is the only crate allowed to use unsafe.
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

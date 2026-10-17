@@ -6,11 +6,23 @@ use crate::model::{LengthUnit, SelectableModel};
 use crate::profile::Profile2D;
 use crate::{GeometryError, Tolerance};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ImportOptions {
     /// The unit to assume when the file does not declare one.
     pub units: Option<LengthUnit>,
     pub tolerance: Tolerance,
+    /// Maximum distance (mm) between the render mesh and the true surface.
+    pub mesh_deflection: f64,
+}
+
+impl Default for ImportOptions {
+    fn default() -> Self {
+        Self {
+            units: None,
+            tolerance: Tolerance::default(),
+            mesh_deflection: 0.05,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
