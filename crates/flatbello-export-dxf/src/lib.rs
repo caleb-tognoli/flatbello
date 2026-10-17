@@ -210,8 +210,10 @@ mod tests {
     fn pairs(dxf: &str) -> Vec<(u16, String)> {
         let lines: Vec<&str> = dxf.split("\r\n").collect();
         lines
-            .chunks_exact(2)
-            .map(|c| (c[0].trim().parse().unwrap(), c[1].to_string()))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|[code, value]| (code.trim().parse().unwrap(), value.to_string()))
             .collect()
     }
 
