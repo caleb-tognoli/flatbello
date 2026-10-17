@@ -3,20 +3,35 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use flatbello_core::{ExportOptions, sample};
+use flatbello_core::format::fixed;
+use flatbello_core::{
+    ExportOptions, FaceId, FaceKind, ImportOptions, ModelGeometry, Tolerance, layout_side_by_side,
+    sample,
+};
+use flatbello_engine::{Engine, ExtractOptions, ModelId, XAxisRule};
+
+/// Space between profiles exported side by side, in mm.
+const LAYOUT_GAP: f64 = 10.0;
 
 const USAGE: &str = "\
 usage: flatbello-cli <command>
 
 commands:
+  faces <model>            list the faces of a STEP or IGES model
+  export <model> --face <n> [--face <n> ...] [--format dxf|svg] [--x-axis longest|plane]
+         -o <file>         write the profiles of the given faces, side by side
+                           (default format: dxf, which is DXF R12 in millimetres)
   demo-export [-o <dir>]   write demo.dxf (R12) and demo.svg: a 100 x 60 mm plate with
                            5 mm corner radii and two round holes (default dir: .)
   help                     show this message";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let rest = args.get(1..).unwrap_or(&[]);
     let result = match args.first().map(String::as_str) {
-        Some("demo-export") => demo_export(&args[1..]),
+        Some("faces") => faces(rest),
+        Some("export") => export(rest),
+        Some("demo-export") => demo_export(rest),
         Some("help" | "-h" | "--help") => {
             println!("{USAGE}");
             Ok(())
@@ -31,6 +46,96 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn open_model(path: &str) -> Result<(Engine, ModelId), String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("reading {path}: {e}"))?;
+    let mut engine = Engine::new();
+    let id = engine
+        .open(&bytes, path, &ImportOptions::default())
+        .map_err(|e| format!("{path}: {e}"))?;
+    Ok((engine, id))
+}
+
+fn faces(args: &[String]) -> Result<(), String> {
+    let [path] = args else {
+        return Err(format!("faces takes one model file\n\n{USAGE}"));
+    };
+    let (engine, id) = open_model(path)?;
+    let model = engine.model(id).map_err(|e| e.to_string())?;
+    let ModelGeometry::Brep(breps) = &model.geometry;
+    println!("{:>5}  {:<11}  {:>12}  normal", "face", "kind", "area mm²");
+    for f in &model.faces {
+        let kind = match f.kind {
+            FaceKind::Planar => "planar",
+            FaceKind::Cylindrical => "cylindrical",
+            FaceKind::Other => "other",
+        };
+        let normal = breps
+            .get(f.id.0 as usize)
+            .and_then(|b| b.plane)
+            .map(|p| {
+                let n = p.normal;
+                format!("({}, {}, {})", fixed(n.x, 3), fixed(n.y, 3), fixed(n.z, 3))
+            })
+            .unwrap_or_default();
+        println!("{:>5}  {:<11}  {:>12.3}  {normal}", f.id.0, kind, f.area);
+    }
+    Ok(())
+}
+
+fn export(args: &[String]) -> Result<(), String> {
+    let mut model: Option<&str> = None;
+    let mut faces: Vec<FaceId> = Vec::new();
+    let mut format = "dxf-r12";
+    let mut out: Option<&str> = None;
+    let mut x_axis = XAxisRule::LongestStraightEdge;
+    let mut it = args.iter().map(String::as_str);
+    while let Some(arg) = it.next() {
+        let mut value = || it.next().ok_or(format!("{arg} needs a value"));
+        match arg {
+            "--face" => {
+                let v = value()?;
+                faces.push(FaceId(
+                    v.parse().map_err(|_| format!("bad face number \"{v}\""))?,
+                ));
+            }
+            "--format" => {
+                format = match value()? {
+                    "dxf" | "dxf-r12" => "dxf-r12",
+                    "svg" => "svg",
+                    other => return Err(format!("unknown format \"{other}\"")),
+                }
+            }
+            "--x-axis" => {
+                x_axis = match value()? {
+                    "longest" => XAxisRule::LongestStraightEdge,
+                    "plane" => XAxisRule::PlaneX,
+                    other => return Err(format!("unknown x-axis rule \"{other}\"")),
+                }
+            }
+            "-o" => out = Some(value()?),
+            _ if model.is_none() && !arg.starts_with('-') => model = Some(arg),
+            _ => return Err(format!("unexpected argument \"{arg}\"\n\n{USAGE}")),
+        }
+    }
+    let (Some(model), Some(out)) = (model, out) else {
+        return Err(format!("export needs a model and -o <file>\n\n{USAGE}"));
+    };
+    if faces.is_empty() {
+        return Err("export needs at least one --face".into());
+    }
+
+    let (engine, id) = open_model(model)?;
+    let tolerance = Tolerance::default();
+    let options = ExtractOptions { tolerance, x_axis };
+    let profiles = engine
+        .extract(id, &faces, &options)
+        .map_err(|e| e.to_string())?;
+    let laid = layout_side_by_side(&profiles, LAYOUT_GAP, &tolerance);
+    let bytes = flatbello_engine::export(&laid, format, &ExportOptions { tolerance })
+        .map_err(|e| e.to_string())?;
+    write_file(Path::new(out), &bytes)
 }
 
 fn demo_export(args: &[String]) -> Result<(), String> {
