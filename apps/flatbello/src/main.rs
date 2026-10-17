@@ -1,3 +1,6 @@
+// Release builds on Windows are GUI programs, without a console window.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 //! Flatbello desktop application (egui + wgpu).
 
 mod app;

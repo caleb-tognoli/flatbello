@@ -1,0 +1,123 @@
+name: Package
+
+# Builds installers: a .deb (Ubuntu 26.04), an NSIS installer (Windows) and a .dmg (macOS).
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths:
+      - ".github/workflows/package.yml"
+      - "tools/package/**"
+      - "apps/flatbello/Cargo.toml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux .deb
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - name: Install OCCT and Rust
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential pkg-config ca-certificates curl git dpkg-dev \
+            libocct-foundation-dev libocct-modeling-data-dev \
+            libocct-modeling-algorithms-dev libocct-data-exchange-dev rustup
+          rustup default stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-packager --locked
+      # Linux packages depend on the distribution's OCCT, so only the notices are bundled.
+      - run: |
+          mkdir -p target/package-resources
+          cp tools/package/THIRD_PARTY_NOTICES.md target/package-resources/
+      - run: cargo packager --release -p flatbello --formats deb
+        working-directory: apps/flatbello
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatbello-linux-deb
+          path: target/release/*.deb
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 240
+    env:
+      VCPKG_TRIPLET: x64-windows-release
+    steps:
+      - uses: actions/checkout@v5
+      - name: Locate vcpkg
+        shell: pwsh
+        run: |
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          $occt = "$root\installed\$env:VCPKG_TRIPLET"
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          "OCCT_ROOT=$occt" >> $env:GITHUB_ENV
+          "OCCT_INCLUDE_DIR=$occt\include\opencascade" >> $env:GITHUB_ENV
+          "OCCT_LIB_DIR=$occt\lib" >> $env:GITHUB_ENV
+      - id: occt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}\installed
+          key: vcpkg-opencascade-${{ env.VCPKG_TRIPLET }}-v1
+      - name: Install OCCT
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: '& "$env:VCPKG_ROOT\vcpkg.exe" install "opencascade:$env:VCPKG_TRIPLET"'
+      - if: steps.occt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}\installed
+          key: vcpkg-opencascade-${{ env.VCPKG_TRIPLET }}-v1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-packager --locked
+      # OCCT's DLLs (and those they need) go next to flatbello.exe, with OCCT's licence.
+      - name: Gather resources
+        shell: pwsh
+        run: |
+          $res = "target\package-resources"
+          New-Item -ItemType Directory -Force $res | Out-Null
+          Copy-Item tools\package\THIRD_PARTY_NOTICES.md $res
+          Copy-Item "$env:OCCT_ROOT\bin\*.dll" $res
+          Get-ChildItem "$env:OCCT_ROOT\share\opencascade" -File | Copy-Item -Destination $res
+          Get-ChildItem $res | Select-Object -ExpandProperty Name
+      - run: cargo packager --release -p flatbello --formats nsis
+        working-directory: apps/flatbello
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatbello-windows-installer
+          path: target/release/*.exe
+
+  macos:
+    name: macOS .dmg
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install opencascade
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-packager --locked
+      - name: Gather resources
+        run: |
+          mkdir -p target/package-resources
+          cp tools/package/THIRD_PARTY_NOTICES.md target/package-resources/
+          cp "$(brew --prefix opencascade)"/*LGPL* target/package-resources/ 2>/dev/null || true
+      - run: cargo packager --release -p flatbello --formats app
+        working-directory: apps/flatbello
+      # Copy OCCT's dylibs into the bundle so it runs without Homebrew, then build the .dmg.
+      - run: |
+          app=$(find target/release -maxdepth 2 -name "Flatbello.app" | head -n 1)
+          tools/package/macos-bundle-occt.sh "$app" target/release/Flatbello.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatbello-macos-dmg
+          path: target/release/Flatbello.dmg

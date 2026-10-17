@@ -1,5 +1,6 @@
 [package]
 name = "flatbello"
+authors = ["Caleb Tognoli"]
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -16,3 +17,24 @@ rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "p
 
 [lints]
 workspace = true
+
+# Installers, built with cargo-packager (a build tool, not a dependency):
+#   cargo packager --release -p flatbello --formats deb|nsis|app
+# The packaging workflow fills target/package-resources first (notices, and OCCT's DLLs and
+# licence on Windows); see .github/workflows/package.yml.
+[package.metadata.packager]
+product-name = "Flatbello"
+identifier = "io.github.caleb-tognoli.flatbello"
+description = "Turn a face of a 3D model into a cutter-ready DXF or SVG"
+resources = ["../../target/package-resources/*"]
+before-packaging-command = "cargo build --release -p flatbello"
+
+[package.metadata.packager.deb]
+depends = [
+    "libocct-foundation-7.9",
+    "libocct-modeling-data-7.9",
+    "libocct-modeling-algorithms-7.9",
+    "libocct-data-exchange-7.9",
+    "libxkbcommon0",
+    "libvulkan1",
+]
