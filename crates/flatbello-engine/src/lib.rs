@@ -15,6 +15,8 @@ use flatbello_import_step::{IgesImporter, StepImporter};
 
 pub use flatbello_extract::{ExtractOptions, XAxisRule};
 
+pub mod wire;
+
 /// The first exporter of each kind is the default for it: DXF R2000 before R12.
 static EXPORTERS: [&dyn Exporter; 3] = [&DxfR2000Exporter, &DxfR12Exporter, &SvgExporter];
 static IMPORTERS: [&dyn Importer; 4] = [&StepImporter, &IgesImporter, &StlImporter, &ObjImporter];
