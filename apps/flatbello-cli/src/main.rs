@@ -5,13 +5,9 @@ use std::process::ExitCode;
 
 use flatbello_core::format::fixed;
 use flatbello_core::{
-    ExportOptions, FaceId, FaceKind, ImportOptions, ModelGeometry, Tolerance, layout_side_by_side,
-    sample,
+    ExportOptions, FaceId, FaceKind, ImportOptions, ModelGeometry, Tolerance, sample,
 };
 use flatbello_engine::{Engine, ExtractOptions, ModelId, XAxisRule};
-
-/// Space between profiles exported side by side, in mm.
-const LAYOUT_GAP: f64 = 10.0;
 
 const USAGE: &str = "\
 usage: flatbello-cli <command>
@@ -128,12 +124,14 @@ fn export(args: &[String]) -> Result<(), String> {
 
     let (engine, id) = open_model(model)?;
     let tolerance = Tolerance::default();
-    let options = ExtractOptions { tolerance, x_axis };
-    let profiles = engine
-        .extract(id, &faces, &options)
-        .map_err(|e| e.to_string())?;
-    let laid = layout_side_by_side(&profiles, LAYOUT_GAP, &tolerance);
-    let bytes = flatbello_engine::export(&laid, format, &ExportOptions { tolerance })
+    let bytes = engine
+        .export_faces(
+            id,
+            &faces,
+            &ExtractOptions { tolerance, x_axis },
+            format,
+            &ExportOptions { tolerance },
+        )
         .map_err(|e| e.to_string())?;
     write_file(Path::new(out), &bytes)
 }

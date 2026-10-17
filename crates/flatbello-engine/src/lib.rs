@@ -5,7 +5,7 @@ use core::fmt;
 
 use flatbello_core::{
     ExportError, ExportOptions, Exporter, Face, FaceId, ImportError, ImportOptions, Importer,
-    ModelGeometry, Profile2D, RenderMesh, SelectableModel,
+    ModelGeometry, Profile2D, RenderMesh, SelectableModel, layout_side_by_side,
 };
 use flatbello_export_dxf::DxfR12Exporter;
 use flatbello_export_svg::SvgExporter;
@@ -91,6 +91,20 @@ pub fn importer_for(bytes: &[u8], filename_hint: &str) -> Option<&'static dyn Im
         .or_else(|| IMPORTERS.iter().copied().find(|i| i.sniff(bytes)))
 }
 
+/// Imports a model without keeping it. Safe to call on a worker thread.
+pub fn import(
+    bytes: &[u8],
+    filename_hint: &str,
+    options: &ImportOptions,
+) -> Result<SelectableModel, EngineError> {
+    let importer = importer_for(bytes, filename_hint)
+        .ok_or_else(|| EngineError::UnrecognizedFile(filename_hint.into()))?;
+    Ok(importer.load(bytes, options)?)
+}
+
+/// Space between profiles exported side by side, in mm.
+pub const LAYOUT_GAP: f64 = 10.0;
+
 /// Writes `profiles` with the exporter whose id is `format`.
 pub fn export(
     profiles: &[Profile2D],
@@ -116,16 +130,19 @@ impl Engine {
         Self::default()
     }
 
-    /// Imports a model. `filename_hint` is used only to pick the importer by extension.
+    /// Imports a model and keeps it. `filename_hint` is used only to pick the importer by extension.
     pub fn open(
         &mut self,
         bytes: &[u8],
         filename_hint: &str,
         options: &ImportOptions,
     ) -> Result<ModelId, EngineError> {
-        let importer = importer_for(bytes, filename_hint)
-            .ok_or_else(|| EngineError::UnrecognizedFile(filename_hint.into()))?;
-        let model = importer.load(bytes, options)?;
+        let model = import(bytes, filename_hint, options)?;
+        self.insert(model)
+    }
+
+    /// Keeps a model imported with [`import`], for example on another thread.
+    pub fn insert(&mut self, model: SelectableModel) -> Result<ModelId, EngineError> {
         let id = ModelId(u32::try_from(self.models.len()).map_err(|_| {
             EngineError::Import(ImportError::Unsupported("too many models".into()))
         })?);
@@ -152,6 +169,22 @@ impl Engine {
 
     pub fn render_mesh(&self, id: ModelId) -> Result<&RenderMesh, EngineError> {
         Ok(&self.model(id)?.mesh)
+    }
+
+    /// Extracts the faces, lays them out side by side with [`LAYOUT_GAP`] and writes them with
+    /// the exporter `format`. The CLI and the desktop app both export through this, so they
+    /// produce identical files.
+    pub fn export_faces(
+        &self,
+        id: ModelId,
+        faces: &[FaceId],
+        extract: &ExtractOptions,
+        format: &str,
+        options: &ExportOptions,
+    ) -> Result<Vec<u8>, EngineError> {
+        let profiles = self.extract(id, faces, extract)?;
+        let laid = layout_side_by_side(&profiles, LAYOUT_GAP, &options.tolerance);
+        export(&laid, format, options)
     }
 
     /// One profile per requested face, in the order given.
