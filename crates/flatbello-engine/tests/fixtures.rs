@@ -39,12 +39,11 @@ fn tol() -> Tolerance {
 /// The largest planar face whose outward normal is `normal`.
 fn face_facing(e: &Engine, id: ModelId, normal: Vec3) -> FaceId {
     let model = e.model(id).unwrap();
-    let flatbello_core::ModelGeometry::Brep(breps) = &model.geometry;
     let mut best: Option<&Face> = None;
     for f in e.faces(id).unwrap() {
-        let facing = breps[f.id.0 as usize]
-            .plane
-            .is_some_and(|p| p.normal.dot(normal) > 1.0 - 1e-9);
+        let facing = model
+            .face_normal(f.id)
+            .is_some_and(|n| n.dot(normal) > 1.0 - 1e-9);
         if f.kind == FaceKind::Planar && facing && best.is_none_or(|b| f.area > b.area) {
             best = Some(f);
         }
@@ -310,7 +309,6 @@ fn iges_plate_holes() {
     assert_eq!(e.model(id).unwrap().units, LengthUnit::Millimetre);
     // Trimmed-surface IGES has no solid, so pick the largest planar face either way up.
     let model = e.model(id).unwrap();
-    let flatbello_core::ModelGeometry::Brep(breps) = &model.geometry;
     let big = e
         .faces(id)
         .unwrap()
@@ -318,7 +316,7 @@ fn iges_plate_holes() {
         .filter(|f| f.kind == FaceKind::Planar)
         .max_by(|a, b| a.area.total_cmp(&b.area))
         .unwrap();
-    let normal = breps[big.id.0 as usize].plane.unwrap().normal;
+    let normal = model.face_normal(big.id).unwrap();
     assert!(normal.z.abs() > 1.0 - 1e-9);
     let p = extract(&e, id, big.id);
     assert_frame(&p, normal);

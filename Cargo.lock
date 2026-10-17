@@ -684,6 +684,7 @@ name = "flatbello-import-mesh"
 version = "0.1.0"
 dependencies = [
  "flatbello-core",
+ "flatbello-extract",
 ]
 
 [[package]]

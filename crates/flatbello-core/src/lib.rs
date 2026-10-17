@@ -21,7 +21,10 @@ pub use bbox::Bbox2;
 pub use brep::{BrepEdge, BrepFace, BrepPlane, BrepWire, Curve3};
 pub use error::{GeometryError, SegmentError};
 pub use math::{Frame3, Mat4, Point2, Point3, Vec2, Vec3};
-pub use model::{Face, FaceId, FaceKind, LengthUnit, ModelGeometry, RenderMesh, SelectableModel};
+pub use model::{
+    Face, FaceId, FaceKind, LengthUnit, MeshGeometry, MeshPlane, ModelGeometry, RenderMesh,
+    SelectableModel,
+};
 pub use plugin::{ExportError, ExportOptions, Exporter, ImportError, ImportOptions, Importer};
 pub use profile::{Loop, Orientation, Profile2D, layout_side_by_side};
 pub use segment::{Edge, Provenance, Segment};

@@ -126,7 +126,7 @@ pub fn ui_snapshot(model_path: &str, out: &str, faces: &[String]) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flatbello_core::{FaceKind, ModelGeometry};
+    use flatbello_core::FaceKind;
 
     /// Rendering and picking on whatever adapter exists (lavapipe in CI). Skipped, with a note,
     /// on machines without any.
@@ -146,8 +146,7 @@ mod tests {
         assert_eq!(image.len(), (WIDTH * HEIGHT * 4) as usize);
         let face = picked.expect("a face under the centre");
         // The default view looks down at the plate, so the centre is on its top face.
-        let ModelGeometry::Brep(breps) = &model.geometry;
-        let normal = breps[face.0 as usize].plane.unwrap().normal;
+        let normal = model.face_normal(face).unwrap();
         assert!(normal.z > 0.99, "{normal:?}");
         assert_eq!(model.faces[face.0 as usize].kind, FaceKind::Planar);
         // A corner pixel is background.

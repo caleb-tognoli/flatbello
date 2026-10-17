@@ -9,13 +9,14 @@ use flatbello_core::{
 };
 use flatbello_export_dxf::DxfR12Exporter;
 use flatbello_export_svg::SvgExporter;
-use flatbello_extract::{ExtractError, extract_planar};
+use flatbello_extract::{ExtractError, extract_mesh_face, extract_planar};
+use flatbello_import_mesh::{ObjImporter, StlImporter};
 use flatbello_import_step::{IgesImporter, StepImporter};
 
 pub use flatbello_extract::{ExtractOptions, XAxisRule};
 
 static EXPORTERS: [&dyn Exporter; 2] = [&DxfR12Exporter, &SvgExporter];
-static IMPORTERS: [&dyn Importer; 2] = [&StepImporter, &IgesImporter];
+static IMPORTERS: [&dyn Importer; 4] = [&StepImporter, &IgesImporter, &StlImporter, &ObjImporter];
 
 #[derive(Debug)]
 pub enum EngineError {
@@ -195,15 +196,22 @@ impl Engine {
         options: &ExtractOptions,
     ) -> Result<Vec<Profile2D>, EngineError> {
         let model = self.model(id)?;
-        let ModelGeometry::Brep(breps) = &model.geometry;
         faces
             .iter()
-            .map(|&f| {
-                let face = breps
-                    .get(f.0 as usize)
-                    .filter(|b| b.id == f)
-                    .ok_or(EngineError::UnknownFace(f))?;
-                Ok(extract_planar(face, model.units, options)?)
+            .map(|&f| match &model.geometry {
+                ModelGeometry::Brep(breps) => {
+                    let face = breps
+                        .get(f.0 as usize)
+                        .filter(|b| b.id == f)
+                        .ok_or(EngineError::UnknownFace(f))?;
+                    Ok(extract_planar(face, model.units, options)?)
+                }
+                ModelGeometry::Mesh(mesh) => {
+                    if f.0 as usize >= mesh.planes.len() {
+                        return Err(EngineError::UnknownFace(f));
+                    }
+                    Ok(extract_mesh_face(mesh, f, model.units, options)?)
+                }
             })
             .collect()
     }

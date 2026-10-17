@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use flatbello_core::format::fixed;
-use flatbello_core::{
-    ExportOptions, FaceId, FaceKind, ImportOptions, ModelGeometry, Tolerance, sample,
-};
+use flatbello_core::{ExportOptions, FaceId, FaceKind, ImportOptions, Tolerance, sample};
 use flatbello_engine::{Engine, ExtractOptions, ModelId, XAxisRule};
 
 const USAGE: &str = "\
@@ -59,7 +57,6 @@ fn faces(args: &[String]) -> Result<(), String> {
     };
     let (engine, id) = open_model(path)?;
     let model = engine.model(id).map_err(|e| e.to_string())?;
-    let ModelGeometry::Brep(breps) = &model.geometry;
     println!("{:>5}  {:<11}  {:>12}  normal", "face", "kind", "area mm²");
     for f in &model.faces {
         let kind = match f.kind {
@@ -67,13 +64,9 @@ fn faces(args: &[String]) -> Result<(), String> {
             FaceKind::Cylindrical => "cylindrical",
             FaceKind::Other => "other",
         };
-        let normal = breps
-            .get(f.id.0 as usize)
-            .and_then(|b| b.plane)
-            .map(|p| {
-                let n = p.normal;
-                format!("({}, {}, {})", fixed(n.x, 3), fixed(n.y, 3), fixed(n.z, 3))
-            })
+        let normal = model
+            .face_normal(f.id)
+            .map(|n| format!("({}, {}, {})", fixed(n.x, 3), fixed(n.y, 3), fixed(n.z, 3)))
             .unwrap_or_default();
         println!("{:>5}  {:<11}  {:>12.3}  {normal}", f.id.0, kind, f.area);
     }

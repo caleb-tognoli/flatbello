@@ -120,6 +120,36 @@ impl RenderMesh {
 pub enum ModelGeometry {
     /// Exact boundaries, one entry per face, in the same order as [`SelectableModel::faces`].
     Brep(Vec<BrepFace>),
+    /// A welded triangle mesh split into planar regions, one region per face.
+    Mesh(MeshGeometry),
+}
+
+/// The plane of one mesh region: `normal` follows the triangles' winding (outward for a
+/// well-oriented closed mesh).
+#[derive(Clone, Copy, Debug)]
+pub struct MeshPlane {
+    pub origin: Point3,
+    pub normal: Vec3,
+}
+
+/// A welded mesh in millimetres: shared vertices, triangles wound counter-clockwise seen from
+/// outside, the face (region) of every triangle, and every face's plane.
+#[derive(Clone, Debug, Default)]
+pub struct MeshGeometry {
+    pub positions: Vec<Point3>,
+    pub triangles: Vec<[u32; 3]>,
+    pub triangle_face: Vec<FaceId>,
+    pub planes: Vec<MeshPlane>,
+}
+
+impl SelectableModel {
+    /// The outward normal of a planar face, if `face` is one.
+    pub fn face_normal(&self, face: FaceId) -> Option<Vec3> {
+        match &self.geometry {
+            ModelGeometry::Brep(b) => b.get(face.0 as usize)?.plane.map(|p| p.normal),
+            ModelGeometry::Mesh(m) => m.planes.get(face.0 as usize).map(|p| p.normal),
+        }
+    }
 }
 
 /// What an importer produces: the faces a user can pick, a mesh to draw, the geometry behind
