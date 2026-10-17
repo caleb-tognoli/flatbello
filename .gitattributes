@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+# Model and fixture formats are compared byte for byte.
+*.step binary
+*.stp binary
+*.iges binary
+*.igs binary
+*.stl binary
+*.obj binary
+*.dxf binary
+*.svg binary
