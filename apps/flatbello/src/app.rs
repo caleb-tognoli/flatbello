@@ -97,6 +97,8 @@ pub struct App {
     x_axis: XAxisRule,
     one_file_per_face: bool,
     status: String,
+    /// The status message reports a failure and is shown in red.
+    status_is_error: bool,
     tolerance: Tolerance,
     /// A model arrived (or went away) and the 3D view must be rebuilt.
     pub new_mesh: bool,
@@ -133,6 +135,7 @@ impl App {
             x_axis: XAxisRule::LongestStraightEdge,
             one_file_per_face: false,
             status: "Open a STEP, IGES, STL or OBJ model, or drop one on the window.".into(),
+            status_is_error: false,
             tolerance: Tolerance::default(),
             new_mesh: false,
             states_dirty: false,
@@ -149,6 +152,16 @@ impl App {
         self.model.as_ref().map(|m| &m.summary.mesh)
     }
 
+    fn inform(&mut self, message: String) {
+        self.status = message;
+        self.status_is_error = false;
+    }
+
+    fn fail(&mut self, message: String) {
+        self.status = message;
+        self.status_is_error = true;
+    }
+
     /// The engine stopped: forget the model it held and say so.
     fn engine_crashed(&mut self, Crashed(why): Crashed, doing: &str) {
         if self.model.take().is_some() {
@@ -158,6 +171,7 @@ impl App {
         self.hovered = None;
         self.preview = Ok(Vec::new());
         self.states_dirty = true;
+        self.status_is_error = true;
         self.status = format!(
             "The engine crashed while {doing} ({why}). It has been restarted; open the file again."
         );
@@ -204,7 +218,7 @@ impl App {
             path: path.clone(),
             units,
         });
-        self.status = format!("Loading {name}…");
+        self.inform(format!("Loading {name}…"));
         self.loading = Some(Loading { name, path, result });
     }
 
@@ -226,7 +240,9 @@ impl App {
                     .file_stem()
                     .map_or_else(|| "profile".into(), |s| s.to_string_lossy().into_owned());
                 let faces = summary.faces.len();
-                self.status = format!("{name}: {faces} faces. Click a flat face to select it.");
+                self.inform(format!(
+                    "{name}: {faces} faces. Click a flat face to select it."
+                ));
                 if summary.units == LengthUnit::Unknown {
                     self.units_prompt = Some(UnitsPrompt {
                         path,
@@ -245,8 +261,8 @@ impl App {
                 self.states_dirty = true;
                 self.update_preview();
             }
-            Ok(Response::Error(e)) => self.status = format!("Could not open {name}: {e}"),
-            Ok(_) => self.status = format!("Could not open {name}: unexpected reply"),
+            Ok(Response::Error(e)) => self.fail(format!("Could not open {name}: {e}")),
+            Ok(_) => self.fail(format!("Could not open {name}: unexpected reply")),
             Err(crash) => self.engine_crashed(crash, &format!("opening {name}")),
         }
     }
@@ -326,7 +342,10 @@ impl App {
     fn click_face(&mut self, face: Option<FaceId>, add: bool) {
         match face {
             Some(f) if self.face_kind(f) != Some(FaceKind::Planar) => {
-                self.status = format!("Face {} is curved; only flat faces can be exported.", f.0);
+                self.fail(format!(
+                    "Face {} is curved; only flat faces can be exported.",
+                    f.0
+                ));
                 return;
             }
             Some(f) if add => {
@@ -410,12 +429,12 @@ impl App {
             match result {
                 Ok(()) => written.push(path.display().to_string()),
                 Err(e) => {
-                    self.status = format!("Export failed: {e}");
+                    self.fail(format!("Export failed: {e}"));
                     return;
                 }
             }
         }
-        self.status = format!("Wrote {}", written.join(", "));
+        self.inform(format!("Wrote {}", written.join(", ")));
     }
 
     /// Builds the whole UI. `view_texture` is the 3D view rendered last frame.
@@ -436,7 +455,11 @@ impl App {
                 if self.loading.is_some() {
                     ui.spinner();
                 }
-                ui.label(&self.status);
+                if self.status_is_error {
+                    ui.colored_label(Color32::from_rgb(240, 120, 110), &self.status);
+                } else {
+                    ui.label(&self.status);
+                }
             });
         });
 
