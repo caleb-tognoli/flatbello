@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "tools/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+# License is deliberately unset until it is decided (see docs/DECISIONS.md).
+
+[workspace.dependencies]
+flatbello-core = { path = "crates/flatbello-core" }
+flatbello-extract = { path = "crates/flatbello-extract" }
+flatbello-occt = { path = "crates/flatbello-occt" }
+flatbello-import-step = { path = "crates/flatbello-import-step" }
+flatbello-import-mesh = { path = "crates/flatbello-import-mesh" }
+flatbello-export-dxf = { path = "crates/flatbello-export-dxf" }
+flatbello-export-svg = { path = "crates/flatbello-export-svg" }
+flatbello-engine = { path = "crates/flatbello-engine" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+float_cmp = "warn"

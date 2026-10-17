@@ -1,0 +1,11 @@
+[package]
+name = "flatbello-extract"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+flatbello-core.workspace = true
+
+[lints]
+workspace = true

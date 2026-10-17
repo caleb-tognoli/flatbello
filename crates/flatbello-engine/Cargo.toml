@@ -1,0 +1,16 @@
+[package]
+name = "flatbello-engine"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+flatbello-core.workspace = true
+flatbello-extract.workspace = true
+flatbello-import-step.workspace = true
+flatbello-import-mesh.workspace = true
+flatbello-export-dxf.workspace = true
+flatbello-export-svg.workspace = true
+
+[lints]
+workspace = true
