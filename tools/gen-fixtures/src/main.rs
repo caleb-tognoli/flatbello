@@ -88,9 +88,12 @@ fn asym_plate() -> Result<Shape, OcctError> {
     boxed(0.0, 0.0, 0.0, 50.0, 30.0, 3.0)?.cut(&hole_z(40.0, 22.0, 3.0, 3.0)?)
 }
 
+/// Builds one fixture part.
+type Builder = fn() -> Result<Shape, OcctError>;
+
 fn generate(dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
-    let parts: [(&str, fn() -> Result<Shape, OcctError>); 5] = [
+    let parts: [(&str, Builder); 5] = [
         ("plate_holes", plate_holes),
         ("plate_slots", plate_slots),
         ("l_bracket", l_bracket),
