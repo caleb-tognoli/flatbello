@@ -15,6 +15,9 @@ use flatbello_engine::{Engine, ExtractOptions, ModelId};
 
 const RADIUS_TOL: f64 = 0.01;
 
+/// A loop's (lines, arcs, circles) and the radii of its arcs and circles.
+type Census = ((usize, usize, usize), Vec<f64>);
+
 fn open(name: &str) -> (Engine, ModelId) {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures/generated")
@@ -50,7 +53,7 @@ fn profile(name: &str, normal: Vec3) -> Profile2D {
 }
 
 /// (lines, arcs, circles) of a loop, and the radii of its arcs and circles.
-fn census(l: &Loop) -> ((usize, usize, usize), Vec<f64>) {
+fn census(l: &Loop) -> Census {
     let (mut lines, mut arcs, mut circles, mut radii) = (0, 0, 0, Vec::new());
     for e in l.edges() {
         match e.segment {
@@ -70,7 +73,7 @@ fn census(l: &Loop) -> ((usize, usize, usize), Vec<f64>) {
 }
 
 /// Every loop's census, outer first, holes sorted so that loop order does not matter.
-fn loops(p: &Profile2D) -> Vec<((usize, usize, usize), Vec<f64>)> {
+fn loops(p: &Profile2D) -> Vec<Census> {
     let mut holes: Vec<_> = p.holes().iter().map(census).collect();
     holes.sort_by(|a, b| {
         a.0.cmp(&b.0)
@@ -117,7 +120,7 @@ fn compare(part: &str, level: &str, normal: Vec3, strict: bool) -> String {
             "{part} {level}: size {mw} × {mh} vs {ew} × {eh}"
         );
     }
-    let fmt = |l: &[((usize, usize, usize), Vec<f64>)]| {
+    let fmt = |l: &[Census]| {
         l.iter()
             .map(|((a, b, c), _)| format!("{a}L{b}A{c}C"))
             .collect::<Vec<_>>()
@@ -142,18 +145,18 @@ fn compare(part: &str, level: &str, normal: Vec3, strict: bool) -> String {
     )
 }
 
-const PRISMATIC: [(&str, fn() -> Vec3); 4] = [
-    ("plate_holes", || Vec3::Z),
-    ("plate_slots", || Vec3::Z),
-    ("asym_plate", || -Vec3::Z),
-    ("l_bracket", || -Vec3::X),
+const PRISMATIC: [(&str, Vec3); 4] = [
+    ("plate_holes", Vec3::Z),
+    ("plate_slots", Vec3::Z),
+    ("asym_plate", Vec3::new(0.0, 0.0, -1.0)),
+    ("l_bracket", Vec3::new(-1.0, 0.0, 0.0)),
 ];
 
 #[test]
 fn medium_and_fine_meshes_reproduce_the_exact_profile() {
     for (part, normal) in PRISMATIC {
         for level in ["medium", "fine"] {
-            println!("{}", compare(part, level, normal(), true));
+            println!("{}", compare(part, level, normal, true));
         }
     }
 }
@@ -161,7 +164,7 @@ fn medium_and_fine_meshes_reproduce_the_exact_profile() {
 #[test]
 fn coarse_meshes_keep_every_hole() {
     for (part, normal) in PRISMATIC {
-        println!("{}", compare(part, "coarse", normal(), false));
+        println!("{}", compare(part, "coarse", normal, false));
     }
 }
 
