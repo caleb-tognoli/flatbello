@@ -1,6 +1,7 @@
 //! Imported models: selectable faces and the render mesh.
 
 use crate::GeometryError;
+use crate::brep::BrepFace;
 use crate::math::{Point3, Vec3};
 
 /// Identifies a face within one model.
@@ -15,13 +16,13 @@ pub enum FaceKind {
     Other,
 }
 
-/// A selectable face.
-///
-/// The handle to the importer's underlying geometry is designed with the first importer (M2).
+/// A selectable face. Its geometry is in [`SelectableModel::geometry`] under the same id.
 #[derive(Clone, Debug)]
 pub struct Face {
     pub id: FaceId,
     pub kind: FaceKind,
+    /// Surface area in mm².
+    pub area: f64,
 }
 
 /// The length unit a source file uses. Internally everything is millimetres.
@@ -114,11 +115,20 @@ impl RenderMesh {
     }
 }
 
-/// What an importer produces: the faces a user can pick, a mesh to draw, and the source units.
+/// The geometry extraction works on.
+#[derive(Clone, Debug)]
+pub enum ModelGeometry {
+    /// Exact boundaries, one entry per face, in the same order as [`SelectableModel::faces`].
+    Brep(Vec<BrepFace>),
+}
+
+/// What an importer produces: the faces a user can pick, a mesh to draw, the geometry behind
+/// them, and the source units. Coordinates are millimetres whatever the source units.
 #[derive(Clone, Debug)]
 pub struct SelectableModel {
     pub faces: Vec<Face>,
     pub mesh: RenderMesh,
+    pub geometry: ModelGeometry,
     pub units: LengthUnit,
 }
 
