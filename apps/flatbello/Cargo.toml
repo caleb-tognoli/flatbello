@@ -5,7 +5,14 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+flatbello-core.workspace = true
 flatbello-engine.workspace = true
+egui = { version = "0.37", default-features = false, features = ["default_fonts"] }
+egui-wgpu = { version = "0.37", default-features = false }
+egui-winit = { version = "0.37", default-features = false, features = ["wayland", "x11"] }
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12", "metal", "vulkan", "gles"] }
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "pollster"] }
 
 [lints]
 workspace = true

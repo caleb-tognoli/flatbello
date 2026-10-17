@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential pkg-config ca-certificates curl \
         libocct-foundation-dev libocct-modeling-data-dev \
         libocct-modeling-algorithms-dev libocct-data-exchange-dev \
+        mesa-vulkan-drivers libvulkan1 \
         rustup \
     && rm -rf /var/lib/apt/lists/*
 RUN rustup default stable && rustup component add rustfmt clippy

@@ -2,6 +2,14 @@
 
 [graph]
 all-features = true
+# Desktop targets only; wasm-only dependencies (such as tokio via wasm-bindgen-futures) never build.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
 
 [licenses]
 # Anything not listed here is rejected. GPL and AGPL are never allowed.
@@ -22,6 +30,12 @@ confidence-threshold = 0.93
 # The allow list covers future dependencies too; unused entries are expected.
 unused-allowed-license = "allow"
 
+# egui's bundled fonts (Hack, Ubuntu Light, Noto Emoji). Font licences, allowed for this crate only;
+# pending Caleb's approval (see docs/DECISIONS.md).
+[[licenses.exceptions]]
+crate = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+
 [licenses.private]
 # Flatbello's own crates are unpublished and their license is not decided yet.
 ignore = true
@@ -36,7 +50,18 @@ deny = [
     { crate = "async-std" },
     { crate = "serde" },
     { crate = "anyhow" },
-    { crate = "thiserror" },
+    # thiserror is allowed only inside the wgpu, egui-wgpu and Wayland stacks, never in our code.
+    { crate = "thiserror", wrappers = [
+        "calloop",
+        "egui-wgpu",
+        "gpu-allocator",
+        "naga",
+        "naga-types",
+        "smithay-client-toolkit",
+        "vello_common",
+        "wgpu-core",
+        "wgpu-hal",
+    ] },
 ]
 
 [sources]
