@@ -41,6 +41,7 @@ pub struct Settings {
     pub x_axis: XAxisRule,
     pub native_curves: bool,
     pub loops_as_polylines: bool,
+    pub snap_hole_sizes: bool,
 }
 
 impl Settings {
@@ -48,6 +49,7 @@ impl Settings {
         ExtractOptions {
             tolerance: self.tolerance,
             x_axis: self.x_axis,
+            snap_hole_sizes: self.snap_hole_sizes,
         }
     }
 
@@ -177,6 +179,7 @@ impl Writer {
         });
         self.bool(s.native_curves);
         self.bool(s.loops_as_polylines);
+        self.bool(s.snap_hole_sizes);
     }
     fn segment(&mut self, s: &Segment) {
         match s {
@@ -455,6 +458,7 @@ impl<'a> Reader<'a> {
             x_axis,
             native_curves: self.bool()?,
             loops_as_polylines: self.bool()?,
+            snap_hole_sizes: self.bool()?,
         })
     }
     fn segment(&mut self) -> R<Segment> {

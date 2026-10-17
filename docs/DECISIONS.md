@@ -180,8 +180,7 @@ split in M5 only has to send plain data, and OCCT stays inside two crates.
 - Joints are moved onto the arcs that meet there (onto the intersection between two arcs). When two
   fitted circles miss each other, a short line bridges them, so loops always close.
 - Without a chosen unit, mesh coordinates are read as millimetres and reported as unknown. The app asks
-  and reloads at the chosen scale. Snapping radii to standard hole sizes (an optional step in the plan)
-  is not implemented yet.
+  and reloads at the chosen scale. Snapping holes to standard sizes is an option, off by default (see below).
 - Results on the generated fixtures: plate with holes, slotted plate, asymmetric plate and L-bracket
   reproduce the exact profiles at 0.1, 0.01 and 0.002 mm deflection, coarse included (same counts and
   radii). The B-spline part's curve becomes 2–8 arcs plus short lines, within 0.01 mm of the outline.
@@ -211,3 +210,10 @@ packages instead of bundling them. Windows: NSIS, with vcpkg's OCCT DLLs and lic
 executable. macOS: an `.app` whose Homebrew dylibs are copied into `Contents/Frameworks` and rewritten to
 `@rpath`, ad-hoc signed, in a `.dmg`. No app icon yet. Installers are unsigned, so Windows SmartScreen and
 macOS Gatekeeper will warn until signing certificates are set up.
+
+## 2026-10-17 — Snapping mesh holes to standard sizes
+
+`snap_hole_sizes` (off by default; `--snap-holes`, and a checkbox in the app) rounds a mesh face's circular
+holes to the nearest standard drill diameter when they are within 0.02 mm of it: 0.1 mm steps for metric
+or unitless parts, 1/64 in steps for parts in inches or feet. Exact (STEP/IGES) geometry is never
+changed. Caleb may want a different size table (for example clearance holes for metric screws).

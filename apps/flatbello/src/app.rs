@@ -94,6 +94,7 @@ pub struct App {
     format: Format,
     native_curves: bool,
     closed_polylines: bool,
+    snap_hole_sizes: bool,
     x_axis: XAxisRule,
     one_file_per_face: bool,
     status: String,
@@ -132,6 +133,7 @@ impl App {
             format: Format::DxfR2000,
             native_curves: false,
             closed_polylines: false,
+            snap_hole_sizes: false,
             x_axis: XAxisRule::LongestStraightEdge,
             one_file_per_face: false,
             status: "Open a STEP, IGES, STL or OBJ model, or drop one on the window.".into(),
@@ -183,6 +185,7 @@ impl App {
             x_axis: self.x_axis,
             native_curves: self.native_curves,
             loops_as_polylines: self.closed_polylines,
+            snap_hole_sizes: self.snap_hole_sizes,
         }
     }
 
@@ -516,7 +519,12 @@ impl App {
             "Longest straight edge",
         );
         ui.radio_value(&mut self.x_axis, XAxisRule::PlaneX, "Plane x direction");
-        if self.x_axis != before {
+        let snap = ui
+            .checkbox(&mut self.snap_hole_sizes, "Snap hole sizes (STL, OBJ)")
+            .on_hover_text(
+                "Round mesh holes within 0.02 mm of a standard drill size to that size.",
+            );
+        if self.x_axis != before || snap.changed() {
             self.update_preview();
         }
         ui.add_enabled(

@@ -281,6 +281,54 @@ fn longest_line(l: &Loop, tol: &Tolerance) -> Option<flatbello_core::Vec2> {
     best.and_then(|(_, d)| d.normalized())
 }
 
+/// How far (mm, in diameter) a fitted hole may be from a standard size to snap to it.
+pub const SNAP_DISTANCE: f64 = 0.02;
+
+/// The nearest standard drill diameter in mm: 0.1 mm steps for metric parts, 1/64 in steps for
+/// parts in inches or feet.
+pub fn standard_diameter(d: f64, units: LengthUnit) -> f64 {
+    let step = match units {
+        LengthUnit::Inch | LengthUnit::Foot => 25.4 / 64.0,
+        _ => 0.1,
+    };
+    (d / step).round() * step
+}
+
+/// A circular hole with its diameter snapped to a standard size, if one is close enough.
+fn snap_hole(hole: Loop, units: LengthUnit, tol: &Tolerance) -> Result<Loop, GeometryError> {
+    let [e] = hole.edges() else {
+        return Ok(hole);
+    };
+    let Segment::Circle {
+        center,
+        radius,
+        ccw,
+    } = e.segment
+    else {
+        return Ok(hole);
+    };
+    let d = standard_diameter(2.0 * radius, units);
+    if (d - 2.0 * radius).abs() > SNAP_DISTANCE || d <= 0.0 {
+        return Ok(hole);
+    }
+    let deviation = (d / 2.0 - radius).abs();
+    let previous = match e.provenance {
+        flatbello_core::Provenance::Fitted { max_deviation } => max_deviation,
+        flatbello_core::Provenance::Exact => 0.0,
+    };
+    Loop::new(
+        vec![flatbello_core::Edge::fitted(
+            Segment::Circle {
+                center,
+                radius: d / 2.0,
+                ccw,
+            },
+            previous + deviation,
+        )],
+        tol,
+    )
+}
+
 /// Extracts a mesh face as fitted lines, arcs and circles.
 pub fn extract_mesh_face(
     mesh: &MeshGeometry,
@@ -313,7 +361,14 @@ pub fn extract_mesh_face(
             fitted = fit_loops(mesh, &loops, &frame, tol).map_err(geom)?;
         }
     }
-    let (outer, holes) = split_outer(fitted, tol).ok_or(ExtractError::NoWires(face))?;
+    let (outer, mut holes) = split_outer(fitted, tol).ok_or(ExtractError::NoWires(face))?;
+    if options.snap_hole_sizes {
+        holes = holes
+            .into_iter()
+            .map(|h| snap_hole(h, units, tol))
+            .collect::<Result<_, _>>()
+            .map_err(geom)?;
+    }
     let profile = Profile2D::new(outer, holes, face, frame, units, tol).map_err(geom)?;
     Ok(profile.at_origin(tol))
 }
@@ -443,5 +498,48 @@ mod tests {
         }
         let b = p.bbox(&tol());
         assert!((b.width() - 20.0).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::*;
+
+    #[test]
+    fn standard_sizes() {
+        assert!((standard_diameter(6.03, LengthUnit::Millimetre) - 6.0).abs() < 1e-12);
+        assert!((standard_diameter(6.07, LengthUnit::Unknown) - 6.1).abs() < 1e-12);
+        // 1/4 in = 6.35 mm.
+        assert!((standard_diameter(6.33, LengthUnit::Inch) - 6.35).abs() < 1e-12);
+    }
+
+    #[test]
+    fn snaps_only_circles_close_to_a_standard_size() {
+        let tol = Tolerance::default();
+        let circle = |r: f64| {
+            Loop::new(
+                vec![flatbello_core::Edge::fitted(
+                    Segment::Circle {
+                        center: Point2::ORIGIN,
+                        radius: r,
+                        ccw: false,
+                    },
+                    0.001,
+                )],
+                &tol,
+            )
+            .unwrap()
+        };
+        let radius = |l: &Loop| match l.edges()[0].segment {
+            Segment::Circle { radius, .. } => radius,
+            _ => f64::NAN,
+        };
+        let snapped = snap_hole(circle(2.995), LengthUnit::Millimetre, &tol).unwrap();
+        assert!((radius(&snapped) - 3.0).abs() < 1e-12);
+        let kept = snap_hole(circle(3.03), LengthUnit::Millimetre, &tol).unwrap();
+        assert!(
+            (radius(&kept) - 3.03).abs() < 1e-12,
+            "6.06 mm is 0.04 mm from 6.1 mm"
+        );
     }
 }

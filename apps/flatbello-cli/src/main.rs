@@ -13,11 +13,13 @@ usage: flatbello-cli <command>
 commands:
   faces <model>            list the faces of a STEP or IGES model
   export <model> --face <n> [--face <n> ...] [--format dxf|dxf-r12|svg]
-         [--x-axis longest|plane] [--native-curves] [--closed-polylines] -o <file>
+         [--x-axis longest|plane] [--native-curves] [--closed-polylines] [--snap-holes]
+         -o <file>
                            write the profiles of the given faces, side by side, in mm.
                            dxf is DXF R2000. --native-curves keeps ellipses and splines
                            (R2000 only); --closed-polylines writes each loop as one closed
-                           LWPOLYLINE with arc bulges (R2000 only)
+                           LWPOLYLINE with arc bulges (R2000 only); --snap-holes rounds mesh
+                           holes to standard drill sizes
   demo-export [-o <dir>]   write demo.dxf (R12) and demo.svg: a 100 x 60 mm plate with
                            5 mm corner radii and two round holes (default dir: .)
   help                     show this message";
@@ -82,6 +84,7 @@ fn export(args: &[String]) -> Result<(), String> {
     let mut format = "dxf-r2000";
     let mut native_curves = false;
     let mut loops_as_polylines = false;
+    let mut snap_hole_sizes = false;
     let mut out: Option<&str> = None;
     let mut x_axis = XAxisRule::LongestStraightEdge;
     let mut it = args.iter().map(String::as_str);
@@ -111,6 +114,7 @@ fn export(args: &[String]) -> Result<(), String> {
             }
             "--native-curves" => native_curves = true,
             "--closed-polylines" => loops_as_polylines = true,
+            "--snap-holes" => snap_hole_sizes = true,
             "-o" => out = Some(value()?),
             _ if model.is_none() && !arg.starts_with('-') => model = Some(arg),
             _ => return Err(format!("unexpected argument \"{arg}\"\n\n{USAGE}")),
@@ -129,7 +133,11 @@ fn export(args: &[String]) -> Result<(), String> {
         .export_faces(
             id,
             &faces,
-            &ExtractOptions { tolerance, x_axis },
+            &ExtractOptions {
+                tolerance,
+                x_axis,
+                snap_hole_sizes,
+            },
             format,
             &ExportOptions {
                 tolerance,

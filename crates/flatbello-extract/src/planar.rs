@@ -27,6 +27,9 @@ pub enum XAxisRule {
 pub struct ExtractOptions {
     pub tolerance: Tolerance,
     pub x_axis: XAxisRule,
+    /// Mesh faces only: round circular holes to the nearest standard drill size when they are
+    /// within [`crate::mesh::SNAP_DISTANCE`] of one. Off by default.
+    pub snap_hole_sizes: bool,
 }
 
 #[derive(Clone, Debug)]
