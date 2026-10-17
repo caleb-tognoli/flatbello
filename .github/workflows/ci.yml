@@ -25,7 +25,8 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential pkg-config ca-certificates curl git \
             libocct-foundation-dev libocct-modeling-data-dev \
-            libocct-modeling-algorithms-dev libocct-data-exchange-dev rustup \n            mesa-vulkan-drivers libvulkan1
+            libocct-modeling-algorithms-dev libocct-data-exchange-dev rustup \
+            mesa-vulkan-drivers libvulkan1
           rustup default stable
           rustup component add rustfmt clippy
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
