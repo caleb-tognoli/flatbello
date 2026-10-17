@@ -138,3 +138,29 @@ split in M5 only has to send plain data, and OCCT stays inside two crates.
 - Every planar face's profile is checked against ground truth, not byte-for-byte golden files: edge order
   and start points can differ between OCCT versions, while the geometry must not. Tests also check that
   every frame is right-handed with z along the outward normal, which rules out mirrored output.
+
+## 2026-10-17 — Desktop app structure (M3)
+
+- Versions: egui, egui-wgpu and egui-winit 0.37, wgpu 30, winit 0.30, rfd 0.17, all with default
+  features off. eframe is not used; the app drives winit, egui-winit and egui-wgpu itself.
+- The 3D view renders into an offscreen texture that egui shows as an image, instead of a paint
+  callback. The scene needs its own depth buffer and id target, and the same path renders headless
+  (`--render-test`, `--ui-snapshot`, and the picking test on lavapipe in CI).
+- Picking renders `face id + 1` into an `R32Uint` target and reads back the pixel under the cursor
+  each frame the pointer is over the view.
+- Face highlight state (hovered, selected) is a per-vertex attribute re-uploaded when it changes, so
+  no storage buffers are needed and the GL fallback backend works.
+- wgpu's async setup calls run on a hand-written `block_on`; there is no async runtime.
+- Only flat faces can be selected for export; clicking a curved face says so in the status bar.
+- The app and the CLI both export through `Engine::export_faces`, so the same faces give identical
+  files.
+
+## 2026-10-17 — Transitive thiserror and egui's font licences (pending approval)
+
+- `thiserror` appears only inside wgpu, egui-wgpu and the Wayland stack, never in Flatbello's code.
+  `deny.toml` allows it only through those parents.
+- egui's bundled fonts (`epaint_default_fonts`) are under OFL-1.1 and the Ubuntu Font Licence as well as
+  MIT/Apache. `deny.toml` allows those two font licences for that crate only. **Caleb to approve**; the
+  alternative is bundling a different font under a licence already allowed.
+- The cargo-deny graph is limited to desktop targets, so wasm-only dependencies (such as tokio through
+  wasm-bindgen-futures) are not counted.

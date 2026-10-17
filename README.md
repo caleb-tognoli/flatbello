@@ -8,8 +8,8 @@ true lines, arcs and circles, with holes included and correct units (millimetres
 - **Mesh input (STL, OBJ):** lines, arcs and circles reconstructed from the facets, instead of faceted
   polylines.
 
-Status: early development. STEP and IGES import, exact planar face extraction and the SVG and DXF R12
-writers work from the command line; the desktop viewer is next.
+Status: early development. STEP and IGES import, exact planar face extraction, the SVG and DXF R12
+writers and the desktop viewer work; mesh (STL/OBJ) input is next.
 
 ## Building
 
@@ -26,6 +26,21 @@ Requirements:
 cargo build --workspace
 cargo test --workspace
 ```
+
+### Desktop app
+
+```sh
+cargo run -p flatbello -- [model.step]
+```
+
+Open a model from the toolbar, the command line or by dropping it on the window. Click a flat face to
+select it (Shift or Ctrl adds more), drag to orbit, right- or middle-drag to pan, scroll to zoom and
+double-click to fit the view. The preview on the right shows the selected faces exactly as they will be
+exported; the export settings and the faces list are on the left. The app and the CLI export through the
+same code, so they write identical files for the same faces.
+
+`--render-test <model> <prefix>` and `--ui-snapshot <model> <out.bmp> [face ...]` render without a
+window, for checking the renderer on machines without a display.
 
 ### Command line
 
