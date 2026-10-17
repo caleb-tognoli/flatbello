@@ -39,6 +39,7 @@ fn demo_export(args: &[String]) -> Result<(), String> {
         [flag, dir] if flag == "-o" => PathBuf::from(dir),
         _ => return Err(format!("bad arguments for demo-export\n\n{USAGE}")),
     };
+    std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     let profile = sample::rounded_plate().map_err(|e| format!("building demo profile: {e}"))?;
     let options = ExportOptions::default();
     for (format, file) in [("dxf-r12", "demo.dxf"), ("svg", "demo.svg")] {

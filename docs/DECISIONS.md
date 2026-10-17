@@ -52,3 +52,50 @@ Reason: it enforces the code rules mechanically instead of only through review.
 `.gitattributes` forces LF for text files and marks fixture formats as binary. Reason: output must be
 byte-identical, so golden files must not change line endings depending on the OS or the `core.autocrlf`
 setting.
+
+## 2026-10-17 — Core type refinements (M1)
+
+- `Segment::Circle` and `Segment::Ellipse` carry a `ccw` flag. A loop made of one circle needs a
+  direction, so that holes can wind clockwise like every other loop.
+- `Segment::Spline` wraps a `Spline` struct (degree, knots, control points, optional weights), so
+  that evaluation, reversal and validation live in one place.
+- An `Edge` pairs a `Segment` with its `Provenance`; a `Loop` is a validated list of edges.
+- `Loop` and `Profile2D` have private fields and validating constructors. `Profile2D::new` orients
+  the outer loop counter-clockwise and the holes clockwise, and rejects holes that lie outside the
+  outer loop or inside another hole.
+- Translating a profile moves its `Frame3` origin too, so that profile coordinates always equal
+  `frame.to_local_2d(world point)`.
+- Geometry types do not implement `PartialEq`; tests and code compare through `Tolerance`.
+- `SelectableModel` has no handle to the importer's geometry yet. That handle is designed with
+  the STEP importer in M2.
+
+Reason: these are the smallest changes that make the planned types well-defined and keep their
+invariants.
+
+## 2026-10-17 — Exporters are identified by id, one per format version
+
+`Exporter` gains `id()` (for example `dxf-r12` or `svg`), and each DXF version is its own exporter.
+`ExportOptions` holds only shared settings: currently the tolerance used for flattening. Writers
+write profiles where they are; `layout_side_by_side` and `Profile2D::at_origin` position them.
+Reason: this avoids format-specific fields in a shared options struct, and the UI can list
+exporters directly.
+
+## 2026-10-17 — Writer output conventions
+
+- Numbers are rounded to 6 decimals, trailing zeros are trimmed but one decimal is kept
+  (`2.0`), and negative zero is never written. This keeps output byte-identical across runs.
+- DXF uses CRLF line ends and right-aligned group codes, as AutoCAD writes them. Layer colours:
+  `CUT_OUTER` 7, `CUT_INNER` 1 (red), so cutter software can map them to different settings.
+- DXF R12 has no `ELLIPSE` or `SPLINE` entity, so ellipses, splines and polyline fallbacks become
+  `POLYLINE`s flattened within `tolerance.fit()` (0.01 mm by default). Bulges are not used yet.
+- SVG: the drawing is moved so that its bounding box starts at (0, 0) and y is flipped; one user
+  unit is 1 mm. The stroke is 0.0254 mm (0.001 in hairline), with no fill and one `<path>` per loop.
+  Ellipses are written as exact `A` commands and splines are flattened.
+
+Reason: deterministic, cutter-safe output that common tools read.
+
+## 2026-10-17 — Golden files are blessed explicitly
+
+Golden outputs live in `tests/fixtures/golden/`. Running the tests with `FLATBELLO_BLESS=1`
+rewrites them; every rewrite is reviewed (and the SVG checked visually) before it is committed.
+The hand-built sample profiles are in `flatbello_core::sample`.

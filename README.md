@@ -8,7 +8,7 @@ true lines, arcs and circles, with holes included and correct units (millimetres
 - **Mesh input (STL, OBJ):** lines, arcs and circles reconstructed from the facets, instead of faceted
   polylines.
 
-Status: early development. The workspace skeleton is in place; features land milestone by milestone.
+Status: early development. The 2D core and the SVG and DXF R12 writers work; model import is next.
 
 ## Building
 
@@ -25,6 +25,17 @@ Requirements:
 cargo build --workspace
 cargo test --workspace
 ```
+
+Try the writers with the built-in demo part (a 100 × 60 mm plate with rounded corners and two
+holes):
+
+```sh
+cargo run -p flatbello-cli -- demo-export -o out
+```
+
+This writes `out/demo.dxf` (DXF R12, millimetres) and `out/demo.svg`. Golden files are in
+`tests/fixtures/golden/`; after a deliberate output change, regenerate them with
+`FLATBELLO_BLESS=1 cargo test` and review the diff.
 
 Checks run before every commit and in CI:
 
