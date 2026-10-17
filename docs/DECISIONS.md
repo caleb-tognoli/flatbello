@@ -99,3 +99,42 @@ Reason: deterministic, cutter-safe output that common tools read.
 Golden outputs live in `tests/fixtures/golden/`. Running the tests with `FLATBELLO_BLESS=1`
 rewrites them; every rewrite is reviewed (and the SVG checked visually) before it is committed.
 The hand-built sample profiles are in `flatbello_core::sample`.
+
+## 2026-10-17 — Linux container for OCCT development (M2)
+
+Development builds that need OCCT run in the Docker image in `tools/docker` (Ubuntu 26.04, OCCT 7.9.2).
+CI runs the same checks in Ubuntu 26.04 and 24.04 containers, covering OCCT 7.9 and 7.6 and both
+toolkit naming schemes. Reason: Caleb's choice; the Windows machine has no C++ toolchain yet, and the
+container matches CI exactly. Native Windows builds (vcpkg) follow once the C++ workload is installed.
+
+## 2026-10-17 — B-rep data is copied out of OCCT at import
+
+The STEP/IGES importer copies each planar face's plane and wires (lines, circles, ellipses, trimmed
+B-splines, or sampled points for any other curve) into plain types in `flatbello_core::brep`.
+`SelectableModel::geometry` holds them, and `flatbello-extract` works on them in pure Rust. No OCCT
+handle outlives the import. Reason: extraction stays testable without OCCT, the worker-process
+split in M5 only has to send plain data, and OCCT stays inside two crates.
+
+## 2026-10-17 — Shim behaviour (M2)
+
+- STEP is read from memory (`ReadStream`, OCCT 7.7 and later). IGES, and STEP on older OCCT, go
+  through a temporary file, because those readers only read files. The file is deleted afterwards.
+- One global lock serialises every STEP/IGES read and write: OCCT's translators share global state
+  and crashed when files were loaded on several threads at once.
+- OCCT's default messenger is silenced; failures reach Rust through `fb_last_error()`.
+- Plane normals are computed as X × Y of the plane placement (correct for left-handed placements),
+  then flipped for reversed faces, so they point out of the solid.
+- B-splines are made non-periodic and trimmed to the edge's range in the shim, so Rust receives
+  clamped knot vectors.
+- IGES units come from the global section's unit flag. `UnitValue()` returns cascade units, not metres
+  as its documentation says.
+
+## 2026-10-17 — Extraction details (M2)
+
+- Edge directions are repaired from geometry when the orientation flags do not chain.
+- Edges shorter than the linear tolerance are dropped; the gap they leave is within tolerance.
+- When several straight edges tie for longest (within the linear tolerance), the first in loop order
+  sets the x axis.
+- Every planar face's profile is checked against ground truth, not byte-for-byte golden files: edge order
+  and start points can differ between OCCT versions, while the geometry must not. Tests also check that
+  every frame is right-handed with z along the outward normal, which rules out mirrored output.

@@ -10,14 +10,29 @@ env:
 
 jobs:
   check:
-    name: fmt, clippy, test
+    # Ubuntu 26.04 ships OCCT 7.9 (TKDE* toolkits); 24.04 ships 7.6 (the older TKSTEP/TKIGES names).
+    name: fmt, clippy, test (${{ matrix.image }})
     runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:26.04", "ubuntu:24.04"]
     steps:
+      - name: Install OCCT and Rust
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential pkg-config ca-certificates curl git \
+            libocct-foundation-dev libocct-modeling-data-dev \
+            libocct-modeling-algorithms-dev libocct-data-exchange-dev rustup
+          rustup default stable
+          rustup component add rustfmt clippy
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.image }}
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features
