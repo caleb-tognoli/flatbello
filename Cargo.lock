@@ -97,6 +97,7 @@ dependencies = [
 name = "gen-fixtures"
 version = "0.1.0"
 dependencies = [
+ "flatbello-core",
  "flatbello-occt",
 ]
 

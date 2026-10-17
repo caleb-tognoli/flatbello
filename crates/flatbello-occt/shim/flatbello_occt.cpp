@@ -20,6 +20,8 @@
 #include <IFSelect_ReturnStatus.hxx>
 #include <IGESControl_Reader.hxx>
 #include <IGESData_IGESModel.hxx>
+#include <Message.hxx>
+#include <Message_Messenger.hxx>
 #include <Poly_Triangulation.hxx>
 #include <STEPControl_Reader.hxx>
 #include <Standard_Failure.hxx>
@@ -59,6 +61,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -101,9 +104,17 @@ int fail(int code, const std::string &message) {
     return code;
 }
 
+/// OCCT prints progress and parse errors to stdout through its default messenger; a library
+/// must not, and failures are reported through fb_last_error instead.
+void silence_occt() {
+    static std::once_flag once;
+    std::call_once(once, [] { Message::DefaultMessenger()->ChangePrinters().Clear(); });
+}
+
 template <typename F> int guard(F &&body) {
     try {
         g_error.clear();
+        silence_occt();
         return body();
     } catch (const Standard_Failure &e) {
         const char *msg = e.GetMessageString();

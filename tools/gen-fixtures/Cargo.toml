@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+flatbello-core.workspace = true
 flatbello-occt = { workspace = true, features = ["fixtures"] }
 
 [lints]
