@@ -88,11 +88,13 @@ pub fn ui_snapshot(model_path: &str, out: &str, faces: &[String]) -> Result<(), 
         view_formats: &[],
     });
     let view = target.create_view(&Default::default());
-    let input = || egui::RawInput {
+    // Time advances between frames so that egui's fade-in animations finish.
+    let input = |frame: u32| egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
             egui::vec2(SIZE[0] as f32, SIZE[1] as f32),
         )),
+        time: Some(f64::from(frame) * 0.5),
         ..Default::default()
     };
 
@@ -112,8 +114,8 @@ pub fn ui_snapshot(model_path: &str, out: &str, faces: &[String]) -> Result<(), 
         .collect::<Result<Vec<_>, _>>()?;
     shell.app.select_faces(&ids);
     // egui settles its layout over a couple of frames.
-    for _ in 0..3 {
-        shell.frame(&gpu, input(), &view, SIZE);
+    for frame in 0..4 {
+        shell.frame(&gpu, input(frame), &view, SIZE);
     }
     let rgba = viewport::read_texture(&gpu.device, &gpu.queue, &target, SIZE[0], SIZE[1])
         .ok_or("could not read the snapshot")?;

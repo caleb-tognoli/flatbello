@@ -6,15 +6,22 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use egui::{Color32, Pos2, Rect, Sense, Ui, Vec2};
 use flatbello_core::{
-    ExportOptions, FaceId, FaceKind, ImportOptions, Profile2D, SelectableModel, Tolerance,
-    layout_side_by_side,
+    ExportOptions, FaceId, FaceKind, ImportOptions, LengthUnit, Point3, Profile2D, SelectableModel,
+    Tolerance, layout_side_by_side,
 };
 use flatbello_engine::{Engine, ExtractOptions, LAYOUT_GAP, ModelId, XAxisRule};
 
 use crate::camera::Camera;
 use crate::preview;
 
-const MODEL_EXTENSIONS: &[&str] = &["step", "stp", "iges", "igs"];
+const MODEL_EXTENSIONS: &[&str] = &["step", "stp", "iges", "igs", "stl", "obj"];
+/// Units offered for files that do not declare any.
+const UNIT_CHOICES: [(LengthUnit, &str); 4] = [
+    (LengthUnit::Millimetre, "Millimetres"),
+    (LengthUnit::Centimetre, "Centimetres"),
+    (LengthUnit::Metre, "Metres"),
+    (LengthUnit::Inch, "Inches"),
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -51,6 +58,20 @@ struct Loaded {
     stem: String,
 }
 
+/// A model being imported on a background thread.
+struct Loading {
+    name: String,
+    path: PathBuf,
+    result: Receiver<Result<SelectableModel, String>>,
+}
+
+/// Asks which unit a unitless file (STL, OBJ) is in. `size` is the bounding box in file units.
+struct UnitsPrompt {
+    path: PathBuf,
+    size: [f64; 3],
+    choice: LengthUnit,
+}
+
 /// What the UI asks of the 3D view this frame, in physical pixels.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ViewRequest {
@@ -62,7 +83,8 @@ pub struct ViewRequest {
 pub struct App {
     engine: Engine,
     model: Option<Loaded>,
-    loading: Option<(String, Receiver<Result<SelectableModel, String>>)>,
+    loading: Option<Loading>,
+    units_prompt: Option<UnitsPrompt>,
     selection: Vec<FaceId>,
     hovered: Option<FaceId>,
     pub camera: Camera,
@@ -89,6 +111,7 @@ impl Default for App {
             engine: Engine::new(),
             model: None,
             loading: None,
+            units_prompt: None,
             selection: Vec::new(),
             hovered: None,
             camera: Camera::default(),
@@ -131,27 +154,40 @@ impl App {
 
     /// Starts loading a model on a background thread.
     pub fn open_path(&mut self, path: PathBuf) {
+        self.open_with_units(path, None);
+    }
+
+    /// Loads a model, reading unitless files in `units` (millimetres if `None`).
+    fn open_with_units(&mut self, path: PathBuf, units: Option<LengthUnit>) {
         let name = path.file_name().map_or_else(
             || path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
         let (tx, rx) = mpsc::channel();
         let hint = name.clone();
+        let source = path.clone();
+        let options = ImportOptions {
+            units,
+            ..ImportOptions::default()
+        };
         let spawned = std::thread::Builder::new()
             .name("flatbello-import".into())
             .spawn(move || {
                 let result = std::fs::read(&path)
                     .map_err(|e| format!("reading {}: {e}", path.display()))
                     .and_then(|bytes| {
-                        flatbello_engine::import(&bytes, &hint, &ImportOptions::default())
-                            .map_err(|e| e.to_string())
+                        flatbello_engine::import(&bytes, &hint, &options).map_err(|e| e.to_string())
                     });
                 let _ = tx.send(result);
             });
         match spawned {
             Ok(_) => {
                 self.status = format!("Loading {name}…");
-                self.loading = Some((name, rx));
+                self.loading = Some(Loading {
+                    name,
+                    path: source,
+                    result: rx,
+                });
             }
             Err(e) => self.status = format!("Could not start loading: {e}"),
         }
@@ -159,15 +195,15 @@ impl App {
 
     /// Takes a finished background load, if any.
     pub fn poll_loading(&mut self) {
-        let Some((name, rx)) = &self.loading else {
+        let Some(loading) = &self.loading else {
             return;
         };
-        let result = match rx.try_recv() {
+        let result = match loading.result.try_recv() {
             Ok(r) => r,
             Err(TryRecvError::Empty) => return,
             Err(TryRecvError::Disconnected) => Err("the loader stopped unexpectedly".into()),
         };
-        let name = name.clone();
+        let (name, path) = (loading.name.clone(), loading.path.clone());
         self.loading = None;
         match result.and_then(|m| self.engine.insert(m).map_err(|e| e.to_string())) {
             Ok(id) => {
@@ -179,6 +215,15 @@ impl App {
                     .map_or_else(|| "profile".into(), |s| s.to_string_lossy().into_owned());
                 let faces = self.engine.faces(id).map_or(0, <[_]>::len);
                 self.status = format!("{name}: {faces} faces. Click a flat face to select it.");
+                if let Ok(m) = self.engine.model(id)
+                    && m.units == LengthUnit::Unknown
+                {
+                    self.units_prompt = Some(UnitsPrompt {
+                        path,
+                        size: extent(m.mesh.positions()),
+                        choice: LengthUnit::Millimetre,
+                    });
+                }
                 self.model = Some(Loaded { id, name, stem });
                 self.selection.clear();
                 self.hovered = None;
@@ -187,6 +232,44 @@ impl App {
                 self.update_preview();
             }
             Err(e) => self.status = format!("Could not open {name}: {e}"),
+        }
+    }
+
+    /// Reloads the unitless model in `units`.
+    fn confirm_units(&mut self, units: LengthUnit) {
+        if let Some(prompt) = self.units_prompt.take() {
+            self.open_with_units(prompt.path, Some(units));
+        }
+    }
+
+    fn units_window(&mut self, ctx: &egui::Context) {
+        let Some(prompt) = &mut self.units_prompt else {
+            return;
+        };
+        let mut confirmed = None;
+        egui::Window::new("Units")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    "This file does not say which unit it uses. Choose the one it was made in:",
+                );
+                for (unit, label) in UNIT_CHOICES {
+                    let mm = unit.millimetres_per_unit().unwrap_or(1.0);
+                    let [x, y, z] = prompt.size.map(|v| v * mm);
+                    ui.radio_value(
+                        &mut prompt.choice,
+                        unit,
+                        format!("{label}: part is {x:.1} × {y:.1} × {z:.1} mm"),
+                    );
+                }
+                if ui.button("Use these units").clicked() {
+                    confirmed = Some(prompt.choice);
+                }
+            });
+        if let Some(u) = confirmed {
+            self.confirm_units(u);
         }
     }
 
@@ -245,7 +328,7 @@ impl App {
 
     fn open_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("CAD models (STEP, IGES)", MODEL_EXTENSIONS)
+            .add_filter("Models (STEP, IGES, STL, OBJ)", MODEL_EXTENSIONS)
             .pick_file()
         {
             self.open_path(path);
@@ -359,6 +442,8 @@ impl App {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ui, |ui| self.viewport(ui, view_texture));
+        let ctx = ui.ctx().clone();
+        self.units_window(&ctx);
     }
 
     fn sidebar(&mut self, ui: &mut Ui) {
@@ -489,6 +574,22 @@ impl App {
     }
 }
 
+/// Bounding-box size of `points`.
+fn extent(points: &[Point3]) -> [f64; 3] {
+    if points.is_empty() {
+        return [0.0; 3];
+    }
+    let mut lo = [f64::MAX; 3];
+    let mut hi = [f64::MIN; 3];
+    for p in points {
+        for (i, v) in [p.x, p.y, p.z].into_iter().enumerate() {
+            lo[i] = lo[i].min(v);
+            hi[i] = hi[i].max(v);
+        }
+    }
+    [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -579,6 +680,42 @@ mod tests {
             let (ba, bb) = (a.bbox(&app.tolerance), b.bbox(&app.tolerance));
             assert!(ba.min.distance(bb.min) < 1e-12 && ba.max.distance(bb.max) < 1e-12);
         }
+    }
+
+    fn wait(app: &mut App) {
+        while app.is_busy() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            app.poll_loading();
+        }
+    }
+
+    #[test]
+    fn unitless_meshes_ask_for_units_and_reload_scaled() {
+        let mut app = loaded("plate_holes_medium.stl");
+        let prompt = app.units_prompt.as_ref().expect("a units prompt");
+        assert!((prompt.size[0] - 100.0).abs() < 1e-3 && (prompt.size[1] - 60.0).abs() < 1e-3);
+        let id = app.model.as_ref().unwrap().id;
+        let area_mm = app
+            .engine
+            .faces(id)
+            .unwrap()
+            .iter()
+            .map(|f| f.area)
+            .fold(0.0, f64::max);
+        app.confirm_units(LengthUnit::Inch);
+        assert!(app.units_prompt.is_none());
+        wait(&mut app);
+        let m = app.engine.model(app.model.as_ref().unwrap().id).unwrap();
+        assert_eq!(m.units, LengthUnit::Inch);
+        assert!(app.units_prompt.is_none(), "units are known now");
+        let area_in = m.faces.iter().map(|f| f.area).fold(0.0, f64::max);
+        assert!((area_in / area_mm - 25.4 * 25.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn step_files_do_not_ask_for_units() {
+        let app = loaded("plate_holes.step");
+        assert!(app.units_prompt.is_none());
     }
 
     #[test]
