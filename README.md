@@ -51,7 +51,8 @@ cargo run -p flatbello-cli -- faces part.step
 cargo run -p flatbello-cli -- export part.step --face 4 --format dxf -o face4.dxf
 ```
 
-`batch model.step --thickness 5 -o plates/` writes every 5 mm plate to its own file.
+`batch model.step --thickness 5 -o plates/` writes every 5 mm plate to its own file. `--kerf 0.15` offsets
+outlines by half a 0.15 mm kerf (outline out, holes in) so parts come out at their true size.
 
 `faces` lists every face with its kind, area and outward normal. `export` writes one or more faces
 (`--face` may repeat; they are laid out side by side) as DXF R12 or SVG in millimetres. Each face is

@@ -233,3 +233,12 @@ once, as the larger of its two faces, and larger faces claim partners first. `fl
 --thickness t` writes one file per plate; the app's "Select plates" selects them and turns on one file
 per face. An L-bracket counts as two plates (base and upright). Thickness must be given; finding the
 common thicknesses automatically is a possible next step.
+
+## 2026-10-18 — Kerf compensation (second backlog item)
+
+`kerf_width` (0 by default; `--kerf <mm>`, a Kerf field in the app) offsets every extracted profile by half
+the kerf with OCCT's planar offset (round joins): outlines grow and holes shrink, so the cut part comes
+out at its true size. Each loop is offset as its own region, so an outline and a hole never merge; a hole
+that closes up is dropped. The result is exact lines and arcs again, read back through the same code as
+STEP faces. Plate detection still compares the exact, uncompensated outlines. Many cutter programs can
+also apply kerf themselves; use one or the other, not both.
