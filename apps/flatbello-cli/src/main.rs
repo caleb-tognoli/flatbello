@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use flatbello_core::format::fixed;
-use flatbello_core::{ExportOptions, FaceId, FaceKind, ImportOptions, Tolerance, sample};
+use flatbello_core::{ExportOptions, FaceId, FaceKind, ImportOptions, sample};
 use flatbello_engine::{Engine, ExtractOptions, ModelId, XAxisRule};
 
 const USAGE: &str = "\
@@ -20,6 +20,9 @@ commands:
                            (R2000 only); --closed-polylines writes each loop as one closed
                            LWPOLYLINE with arc bulges (R2000 only); --snap-holes rounds mesh
                            holes to standard drill sizes
+  batch <model> --thickness <mm> [export options] -o <dir>
+                           write every plate of that thickness (two flat faces facing
+                           away from each other, that far apart) to its own file
   demo-export [-o <dir>]   write demo.dxf (R12) and demo.svg: a 100 x 60 mm plate with
                            5 mm corner radii and two round holes (default dir: .)
   help                     show this message";
@@ -30,6 +33,7 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("faces") => faces(rest),
         Some("export") => export(rest),
+        Some("batch") => batch(rest),
         Some("demo-export") => demo_export(rest),
         Some("help" | "-h" | "--help") => {
             println!("{USAGE}");
@@ -78,15 +82,25 @@ fn faces(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn export(args: &[String]) -> Result<(), String> {
+/// Options shared by `export` and `batch`.
+struct Job<'a> {
+    model: &'a str,
+    faces: Vec<FaceId>,
+    thickness: Option<f64>,
+    format: &'static str,
+    out: &'a str,
+    extract: ExtractOptions,
+    export: ExportOptions,
+}
+
+fn parse_job<'a>(command: &str, args: &'a [String]) -> Result<Job<'a>, String> {
     let mut model: Option<&str> = None;
     let mut faces: Vec<FaceId> = Vec::new();
+    let mut thickness = None;
     let mut format = "dxf-r2000";
-    let mut native_curves = false;
-    let mut loops_as_polylines = false;
-    let mut snap_hole_sizes = false;
     let mut out: Option<&str> = None;
-    let mut x_axis = XAxisRule::LongestStraightEdge;
+    let mut extract = ExtractOptions::default();
+    let mut export = ExportOptions::default();
     let mut it = args.iter().map(String::as_str);
     while let Some(arg) = it.next() {
         let mut value = || it.next().ok_or(format!("{arg} needs a value"));
@@ -97,6 +111,14 @@ fn export(args: &[String]) -> Result<(), String> {
                     v.parse().map_err(|_| format!("bad face number \"{v}\""))?,
                 ));
             }
+            "--thickness" => {
+                let v = value()?;
+                let t: f64 = v.parse().map_err(|_| format!("bad thickness \"{v}\""))?;
+                if !(t.is_finite() && t > 0.0) {
+                    return Err(format!("bad thickness \"{v}\""));
+                }
+                thickness = Some(t);
+            }
             "--format" => {
                 format = match value()? {
                     "dxf" | "dxf-r2000" => "dxf-r2000",
@@ -106,47 +128,72 @@ fn export(args: &[String]) -> Result<(), String> {
                 }
             }
             "--x-axis" => {
-                x_axis = match value()? {
+                extract.x_axis = match value()? {
                     "longest" => XAxisRule::LongestStraightEdge,
                     "plane" => XAxisRule::PlaneX,
                     other => return Err(format!("unknown x-axis rule \"{other}\"")),
                 }
             }
-            "--native-curves" => native_curves = true,
-            "--closed-polylines" => loops_as_polylines = true,
-            "--snap-holes" => snap_hole_sizes = true,
+            "--native-curves" => export.native_curves = true,
+            "--closed-polylines" => export.loops_as_polylines = true,
+            "--snap-holes" => extract.snap_hole_sizes = true,
             "-o" => out = Some(value()?),
             _ if model.is_none() && !arg.starts_with('-') => model = Some(arg),
             _ => return Err(format!("unexpected argument \"{arg}\"\n\n{USAGE}")),
         }
     }
     let (Some(model), Some(out)) = (model, out) else {
-        return Err(format!("export needs a model and -o <file>\n\n{USAGE}"));
+        return Err(format!("{command} needs a model and -o <path>\n\n{USAGE}"));
     };
-    if faces.is_empty() {
+    Ok(Job {
+        model,
+        faces,
+        thickness,
+        format,
+        out,
+        extract,
+        export,
+    })
+}
+
+fn export(args: &[String]) -> Result<(), String> {
+    let job = parse_job("export", args)?;
+    if job.faces.is_empty() {
         return Err("export needs at least one --face".into());
     }
-
-    let (engine, id) = open_model(model)?;
-    let tolerance = Tolerance::default();
+    let (engine, id) = open_model(job.model)?;
     let bytes = engine
-        .export_faces(
-            id,
-            &faces,
-            &ExtractOptions {
-                tolerance,
-                x_axis,
-                snap_hole_sizes,
-            },
-            format,
-            &ExportOptions {
-                tolerance,
-                native_curves,
-                loops_as_polylines,
-            },
-        )
+        .export_faces(id, &job.faces, &job.extract, job.format, &job.export)
         .map_err(|e| e.to_string())?;
-    write_file(Path::new(out), &bytes)
+    write_file(Path::new(job.out), &bytes)
+}
+
+/// Writes every plate of the given thickness to its own file in the output folder.
+fn batch(args: &[String]) -> Result<(), String> {
+    let job = parse_job("batch", args)?;
+    let thickness = job.thickness.ok_or("batch needs --thickness <mm>")?;
+    let (engine, id) = open_model(job.model)?;
+    let plates = engine
+        .plates(id, thickness, &job.extract)
+        .map_err(|e| e.to_string())?;
+    if plates.is_empty() {
+        return Err(format!("no {thickness} mm plates found in {}", job.model));
+    }
+    let dir = Path::new(job.out);
+    std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+    let stem = Path::new(job.model)
+        .file_stem()
+        .map_or_else(|| "model".into(), |s| s.to_string_lossy().into_owned());
+    let ext = if job.format == "svg" { "svg" } else { "dxf" };
+    for (n, face) in plates.iter().enumerate() {
+        let bytes = engine
+            .export_faces(id, &[*face], &job.extract, job.format, &job.export)
+            .map_err(|e| format!("plate {} (face {}): {e}", n + 1, face.0))?;
+        let name = format!("{stem}_plate{}_face{}.{ext}", n + 1, face.0);
+        write_file(&dir.join(name), &bytes)?;
+    }
+    println!("{} plate(s) of {thickness} mm", plates.len());
+    Ok(())
 }
 
 fn demo_export(args: &[String]) -> Result<(), String> {
