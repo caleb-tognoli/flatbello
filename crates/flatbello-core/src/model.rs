@@ -143,6 +143,14 @@ pub struct MeshGeometry {
 }
 
 impl SelectableModel {
+    /// A point on a planar face's plane and its outward normal, if `face` is planar.
+    pub fn face_plane(&self, face: FaceId) -> Option<(Point3, Vec3)> {
+        match &self.geometry {
+            ModelGeometry::Brep(b) => b.get(face.0 as usize)?.plane.map(|p| (p.origin, p.normal)),
+            ModelGeometry::Mesh(m) => m.planes.get(face.0 as usize).map(|p| (p.origin, p.normal)),
+        }
+    }
+
     /// The outward normal of a planar face, if `face` is one.
     pub fn face_normal(&self, face: FaceId) -> Option<Vec3> {
         match &self.geometry {

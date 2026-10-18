@@ -325,3 +325,22 @@ fn iges_plate_holes() {
     assert_hole(&p, Point3::new(20.0, 30.0, z), 5.0);
     assert_hole(&p, Point3::new(80.0, 30.0, z), 3.0);
 }
+
+#[test]
+fn finds_plates_by_thickness() {
+    let count = |name: &str, t: f64| {
+        let (e, id) = open(name);
+        e.plates(id, t, &ExtractOptions::default()).unwrap()
+    };
+    // One 5 mm plate, reported as one of its two large faces.
+    let (e, id) = open("plate_holes.step");
+    let p = e.plates(id, 5.0, &ExtractOptions::default()).unwrap();
+    assert_eq!(p.len(), 1);
+    assert!(e.model(id).unwrap().face_normal(p[0]).unwrap().z.abs() > 0.99);
+    assert!(count("plate_holes.step", 4.0).is_empty());
+    assert_eq!(count("plate_slots.step", 4.0).len(), 1);
+    // The L-bracket is a 5 mm base and a 5 mm upright.
+    assert_eq!(count("l_bracket.step", 5.0).len(), 2);
+    // Meshes too.
+    assert_eq!(count("plate_holes_fine.stl", 5.0).len(), 1);
+}

@@ -5,7 +5,7 @@ use core::fmt;
 
 use flatbello_core::{
     ExportError, ExportOptions, Exporter, Face, FaceId, ImportError, ImportOptions, Importer,
-    ModelGeometry, Profile2D, RenderMesh, SelectableModel, layout_side_by_side,
+    ModelGeometry, Point3, Profile2D, RenderMesh, SelectableModel, Vec3, layout_side_by_side,
 };
 use flatbello_export_dxf::{DxfR12Exporter, DxfR2000Exporter};
 use flatbello_export_svg::SvgExporter;
@@ -175,6 +175,60 @@ impl Engine {
         Ok(&self.model(id)?.mesh)
     }
 
+    /// The plates of `thickness` mm in the model: pairs of flat faces that face away from each
+    /// other, lie `thickness` apart (within the fit tolerance) and overlap by at least half.
+    /// Each plate is reported once, as the larger of its two faces; results are in face order.
+    pub fn plates(
+        &self,
+        id: ModelId,
+        thickness: f64,
+        options: &ExtractOptions,
+    ) -> Result<Vec<FaceId>, EngineError> {
+        let model = self.model(id)?;
+        let tol = &options.tolerance;
+        let mut planar: Vec<(FaceId, f64, Point3, Vec3)> = model
+            .faces
+            .iter()
+            .filter_map(|f| {
+                let (o, n) = model.face_plane(f.id)?;
+                Some((f.id, f.area, o, n.normalized()?))
+            })
+            .collect();
+        // Larger faces claim their partner first.
+        planar.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        let cos = tol.angular().cos();
+        let mut used = std::collections::HashSet::new();
+        let mut plates = Vec::new();
+        for (i, &(fa, _, oa, na)) in planar.iter().enumerate() {
+            if used.contains(&fa) {
+                continue;
+            }
+            for &(fb, _, ob, nb) in &planar[i + 1..] {
+                if used.contains(&fb) || na.dot(nb) > -cos {
+                    continue;
+                }
+                // The other face lies `thickness` behind this one, against its normal.
+                if ((ob - oa).dot(na) + thickness).abs() > tol.fit() {
+                    continue;
+                }
+                let (Ok(pa), Ok(pb)) = (
+                    self.extract(id, &[fa], options),
+                    self.extract(id, &[fb], options),
+                ) else {
+                    continue;
+                };
+                if overlap(&pa[0], &pb[0], tol) >= 0.5 {
+                    used.insert(fa);
+                    used.insert(fb);
+                    plates.push(fa);
+                    break;
+                }
+            }
+        }
+        plates.sort();
+        Ok(plates)
+    }
+
     /// Extracts the faces, lays them out side by side with [`LAYOUT_GAP`] and writes them with
     /// the exporter `format`. The CLI and the desktop app both export through this, so they
     /// produce identical files.
@@ -218,6 +272,26 @@ impl Engine {
             })
             .collect()
     }
+}
+
+/// How much of the smaller of two profiles' bounding boxes overlaps the other, with `b` mapped
+/// into `a`'s plane through world space: 0 for disjoint, 1 for one inside the other.
+fn overlap(a: &Profile2D, b: &Profile2D, tol: &flatbello_core::Tolerance) -> f64 {
+    let (ba, bb) = (a.bbox(tol), b.bbox(tol));
+    let mut mapped = flatbello_core::Bbox2::EMPTY;
+    for (x, y) in [
+        (bb.min.x, bb.min.y),
+        (bb.max.x, bb.min.y),
+        (bb.max.x, bb.max.y),
+        (bb.min.x, bb.max.y),
+    ] {
+        let world = b.frame().to_world(Point3::new(x, y, 0.0));
+        mapped.include(a.frame().to_local_2d(world));
+    }
+    let w = (ba.max.x.min(mapped.max.x) - ba.min.x.max(mapped.min.x)).max(0.0);
+    let h = (ba.max.y.min(mapped.max.y) - ba.min.y.max(mapped.min.y)).max(0.0);
+    let smaller = (ba.width() * ba.height()).min(mapped.width() * mapped.height());
+    if smaller > 0.0 { w * h / smaller } else { 0.0 }
 }
 
 #[cfg(test)]
