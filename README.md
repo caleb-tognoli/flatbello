@@ -37,7 +37,7 @@ cargo run -p flatbello -- [model.step]
 Open a model (STEP, IGES, STL or OBJ) from the toolbar, the command line or by dropping it on the window.
 STL and OBJ files carry no units, so the app asks which unit the part was made in. Click a flat face to
 select it (Shift or Ctrl adds more), drag to orbit, right- or middle-drag to pan, scroll to zoom and
-double-click to fit the view. The preview on the right shows the selected faces exactly as they will be
+double-click to fit the view. "Select plates" selects every plate of a given thickness, for one file per plate. The preview on the right shows the selected faces exactly as they will be
 exported; the export settings and the faces list are on the left. The app and the CLI export through the
 same code, so they write identical files for the same faces.
 
@@ -50,6 +50,8 @@ window, for checking the renderer on machines without a display.
 cargo run -p flatbello-cli -- faces part.step
 cargo run -p flatbello-cli -- export part.step --face 4 --format dxf -o face4.dxf
 ```
+
+`batch model.step --thickness 5 -o plates/` writes every 5 mm plate to its own file.
 
 `faces` lists every face with its kind, area and outward normal. `export` writes one or more faces
 (`--face` may repeat; they are laid out side by side) as DXF R12 or SVG in millimetres. Each face is

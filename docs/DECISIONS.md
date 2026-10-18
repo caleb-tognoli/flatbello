@@ -224,3 +224,12 @@ CI builds and tests on Ubuntu 26.04 (OCCT 7.9.2) and 24.04 (OCCT 7.6.3), macOS (
 Windows (vcpkg OCCT 8.0.1, x64-windows-release, cached after the first build). All jobs block merges.
 The Package workflow builds the .deb, the NSIS installer and the .dmg as artifacts. OCCT 8.0's
 exceptions are no longer transients, so the shim names the exception type only before 8.0.
+
+## 2026-10-18 — Batch extraction of plates (first backlog item)
+
+A plate of thickness t is a pair of flat faces with opposite outward normals, t apart (within the fit
+tolerance), whose outlines overlap by at least half when mapped onto one plane. Each plate is reported
+once, as the larger of its two faces, and larger faces claim partners first. `flatbello-cli batch
+--thickness t` writes one file per plate; the app's "Select plates" selects them and turns on one file
+per face. An L-bracket counts as two plates (base and upright). Thickness must be given; finding the
+common thicknesses automatically is a possible next step.

@@ -80,6 +80,8 @@ pub enum Request {
         format: String,
         settings: Settings,
     },
+    /// The open model's plates of `thickness` mm (see [`crate::Engine::plates`]).
+    Plates { thickness: f64, settings: Settings },
     /// Test hook: the worker aborts, as it would on a crash inside OCCT.
     Crash,
 }
@@ -99,6 +101,7 @@ pub enum Response {
     Opened(ModelSummary),
     Profiles(Vec<Profile2D>),
     Exported(Vec<u8>),
+    Faces(Vec<FaceId>),
     Error(String),
 }
 
@@ -314,6 +317,14 @@ pub fn encode_request(r: &Request) -> Vec<u8> {
             w.settings(settings);
         }
         Request::Crash => w.u8(3),
+        Request::Plates {
+            thickness,
+            settings,
+        } => {
+            w.u8(4);
+            w.f64(*thickness);
+            w.settings(settings);
+        }
     }
     w.buf
 }
@@ -355,6 +366,10 @@ pub fn encode_response(r: &Response) -> Vec<u8> {
         Response::Error(m) => {
             w.u8(3);
             w.str(m);
+        }
+        Response::Faces(f) => {
+            w.u8(4);
+            w.faces(f);
         }
     }
     w.buf
@@ -574,6 +589,10 @@ pub fn decode_request(data: &[u8]) -> Result<Request, WireError> {
             settings: r.settings()?,
         },
         3 => Request::Crash,
+        4 => Request::Plates {
+            thickness: r.f64()?,
+            settings: r.settings()?,
+        },
         _ => return Err(WireError::Invalid("request")),
     })
 }
@@ -612,6 +631,7 @@ pub fn decode_response(data: &[u8]) -> Result<Response, WireError> {
         }
         2 => Response::Exported(r.bytes()?),
         3 => Response::Error(r.str()?),
+        4 => Response::Faces(r.faces()?),
         _ => return Err(WireError::Invalid("response")),
     })
 }
@@ -703,6 +723,17 @@ impl Service {
                     &settings.export(),
                 )?))
             }
+            Request::Plates {
+                thickness,
+                settings,
+            } => {
+                let id = self.model.ok_or(EngineError::UnknownModel)?;
+                Ok(Response::Faces(self.engine.plates(
+                    id,
+                    thickness,
+                    &settings.extract(),
+                )?))
+            }
             Request::Crash => std::process::abort(),
         }
     }
@@ -747,6 +778,10 @@ mod tests {
                 faces: vec![FaceId(1)],
                 format: "svg".into(),
                 settings,
+            },
+            Request::Plates {
+                thickness: 5.0,
+                settings: Settings::default(),
             },
             Request::Crash,
         ];

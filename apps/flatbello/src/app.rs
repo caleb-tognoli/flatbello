@@ -95,6 +95,8 @@ pub struct App {
     native_curves: bool,
     closed_polylines: bool,
     snap_hole_sizes: bool,
+    /// Thickness (mm) for "Select plates".
+    plate_thickness: f64,
     x_axis: XAxisRule,
     one_file_per_face: bool,
     status: String,
@@ -134,6 +136,7 @@ impl App {
             native_curves: false,
             closed_polylines: false,
             snap_hole_sizes: false,
+            plate_thickness: 3.0,
             x_axis: XAxisRule::LongestStraightEdge,
             one_file_per_face: false,
             status: "Open a STEP, IGES, STL or OBJ model, or drop one on the window.".into(),
@@ -332,6 +335,35 @@ impl App {
     fn face_kind(&self, f: FaceId) -> Option<FaceKind> {
         let m = self.model.as_ref()?;
         m.summary.faces.iter().find(|x| x.id == f).map(|x| x.kind)
+    }
+
+    /// Selects every plate of `plate_thickness` mm, to export one file per plate.
+    fn select_plates(&mut self) {
+        if self.model.is_none() {
+            return;
+        }
+        let request = Request::Plates {
+            thickness: self.plate_thickness,
+            settings: self.settings(),
+        };
+        match self.backend.call(request) {
+            Ok(Response::Faces(faces)) if faces.is_empty() => {
+                self.fail(format!("No {} mm plates found.", self.plate_thickness));
+            }
+            Ok(Response::Faces(faces)) => {
+                self.inform(format!(
+                    "Selected {} plate(s) of {} mm.",
+                    faces.len(),
+                    self.plate_thickness
+                ));
+                self.one_file_per_face = faces.len() > 1;
+                self.selection = faces;
+                self.update_preview();
+            }
+            Ok(Response::Error(e)) => self.fail(format!("Finding plates failed: {e}")),
+            Ok(_) => self.fail("Finding plates failed: unexpected reply".into()),
+            Err(crash) => self.engine_crashed(crash, "finding plates"),
+        }
     }
 
     /// Adds faces to the selection, as clicking them with Shift would.
@@ -540,6 +572,25 @@ impl App {
         }
 
         ui.separator();
+        ui.heading("Plates");
+        ui.horizontal(|ui| {
+            ui.label("Thickness");
+            ui.add(
+                egui::DragValue::new(&mut self.plate_thickness)
+                    .range(0.01..=1000.0)
+                    .speed(0.1)
+                    .suffix(" mm"),
+            );
+        });
+        if ui
+            .add_enabled(self.model.is_some(), egui::Button::new("Select plates"))
+            .on_hover_text("Select every pair of flat faces this far apart, one plate each.")
+            .clicked()
+        {
+            self.select_plates();
+        }
+
+        ui.separator();
         ui.heading("Faces");
         let Some(model) = &self.model else {
             ui.label("No model open.");
@@ -708,6 +759,19 @@ mod tests {
         assert_eq!(app.selection, vec![planar[0]]);
         app.click_face(None, false);
         assert!(app.selection.is_empty());
+    }
+
+    #[test]
+    fn selects_plates_by_thickness() {
+        let mut app = loaded("l_bracket.step");
+        app.plate_thickness = 5.0;
+        app.select_plates();
+        assert_eq!(app.selection.len(), 2, "{}", app.status);
+        assert!(app.one_file_per_face);
+        assert_eq!(app.preview.as_ref().map(Vec::len), Ok(2));
+        app.plate_thickness = 2.0;
+        app.select_plates();
+        assert!(app.status_is_error);
     }
 
     #[test]
