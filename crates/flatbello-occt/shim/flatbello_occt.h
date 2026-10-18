@@ -106,6 +106,19 @@ int fb_edge_bspline(fb_shape *shape, size_t face, size_t wire, size_t edge, doub
 int fb_edge_sample(fb_shape *shape, size_t face, size_t wire, size_t edge, double deflection,
                    double *points, size_t cap, size_t *count);
 
+/* Offsets a planar region in the z = 0 plane by `distance` mm (positive grows it: the outer
+ * boundary moves out, holes shrink), with round joins. `data` holds `len` doubles describing
+ * loops, the outer boundary first: for each loop the number of edges, then each edge as a kind
+ * and its parameters:
+ *   FB_SEG_LINE    x0 y0 x1 y1
+ *   FB_SEG_ARC     cx cy r a0 a1 ccw   (from angle a0 to a1, counter-clockwise if ccw != 0)
+ *   FB_SEG_CIRCLE  cx cy r ccw
+ * Consecutive edges must meet within 1e-3 mm. Each loop is offset as the region it encloses (the
+ * outer one by `distance`, holes by `-distance`), so loops never merge; holes that close vanish.
+ * The result has one planar face per resulting loop; read it with the face functions. */
+enum { FB_SEG_LINE = 0, FB_SEG_ARC = 1, FB_SEG_CIRCLE = 2 };
+int fb_offset_loops(const double *data, size_t len, double distance, fb_shape **out);
+
 /* Meshes every face with the given linear deflection (mm). Call before fb_face_mesh. */
 int fb_tessellate(fb_shape *shape, double deflection);
 

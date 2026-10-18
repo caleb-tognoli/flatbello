@@ -42,6 +42,7 @@ pub struct Settings {
     pub native_curves: bool,
     pub loops_as_polylines: bool,
     pub snap_hole_sizes: bool,
+    pub kerf_width: f64,
 }
 
 impl Settings {
@@ -50,6 +51,7 @@ impl Settings {
             tolerance: self.tolerance,
             x_axis: self.x_axis,
             snap_hole_sizes: self.snap_hole_sizes,
+            kerf_width: self.kerf_width,
         }
     }
 
@@ -183,6 +185,7 @@ impl Writer {
         self.bool(s.native_curves);
         self.bool(s.loops_as_polylines);
         self.bool(s.snap_hole_sizes);
+        self.f64(s.kerf_width);
     }
     fn segment(&mut self, s: &Segment) {
         match s {
@@ -474,6 +477,7 @@ impl<'a> Reader<'a> {
             native_curves: self.bool()?,
             loops_as_polylines: self.bool()?,
             snap_hole_sizes: self.bool()?,
+            kerf_width: self.f64()?,
         })
     }
     fn segment(&mut self) -> R<Segment> {

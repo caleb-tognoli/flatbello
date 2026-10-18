@@ -344,3 +344,34 @@ fn finds_plates_by_thickness() {
     // Meshes too.
     assert_eq!(count("plate_holes_fine.stl", 5.0).len(), 1);
 }
+
+#[test]
+fn kerf_offsets_the_exported_outline() {
+    let (e, id) = open("plate_holes.step");
+    let top = face_facing(&e, id, Vec3::Z);
+    let options = ExtractOptions {
+        kerf_width: 0.2,
+        ..ExtractOptions::default()
+    };
+    let p = e.extract(id, &[top], &options).unwrap().remove(0);
+    let b = p.bbox(&tol());
+    assert!((b.width() - 100.2).abs() < 1e-6 && (b.height() - 60.2).abs() < 1e-6);
+    assert_hole(&p, Point3::new(20.0, 30.0, 5.0), 4.9);
+    assert_hole(&p, Point3::new(80.0, 30.0, 5.0), 2.9);
+    // Plates are still found from the exact outlines.
+    assert_eq!(e.plates(id, 5.0, &options).unwrap().len(), 1);
+}
+
+#[test]
+fn kerf_works_on_fitted_mesh_profiles() {
+    let (e, id) = open("plate_slots_coarse.stl");
+    let top = face_facing(&e, id, Vec3::Z);
+    let options = ExtractOptions {
+        kerf_width: 0.3,
+        ..ExtractOptions::default()
+    };
+    let p = e.extract(id, &[top], &options).unwrap().remove(0);
+    let b = p.bbox(&tol());
+    assert!((b.width() - 80.3).abs() < 1e-3 && (b.height() - 40.3).abs() < 1e-3);
+    assert_eq!(p.holes().len(), 2);
+}

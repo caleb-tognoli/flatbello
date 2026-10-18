@@ -23,6 +23,10 @@ mod ffi {
     pub const FB_SURFACE_PLANE: c_int = 0;
     pub const FB_SURFACE_CYLINDER: c_int = 1;
 
+    pub const FB_SEG_LINE: f64 = 0.0;
+    pub const FB_SEG_ARC: f64 = 1.0;
+    pub const FB_SEG_CIRCLE: f64 = 2.0;
+
     pub const FB_CURVE_LINE: c_int = 0;
     pub const FB_CURVE_CIRCLE: c_int = 1;
     pub const FB_CURVE_ELLIPSE: c_int = 2;
@@ -116,6 +120,12 @@ mod ffi {
             points: *mut f64,
             cap: usize,
             count: *mut usize,
+        ) -> c_int;
+        pub fn fb_offset_loops(
+            data: *const f64,
+            len: usize,
+            distance: f64,
+            out: *mut *mut fb_shape,
         ) -> c_int;
         pub fn fb_tessellate(shape: *mut fb_shape, deflection: f64) -> c_int;
         pub fn fb_face_mesh(
@@ -219,6 +229,11 @@ fn check(rc: c_int) -> Result<(), OcctError> {
         ffi::FB_EOCCT => Err(OcctError::Occt(last_error())),
         _ => Err(OcctError::Other(last_error())),
     }
+}
+
+/// Edge kinds in the loop encoding of [`Shape::offset_loops`].
+pub mod seg {
+    pub use super::ffi::{FB_SEG_ARC as ARC, FB_SEG_CIRCLE as CIRCLE, FB_SEG_LINE as LINE};
 }
 
 /// The OCCT version the shim was compiled against, such as "7.9.2".
@@ -353,6 +368,15 @@ impl Shape {
         let mut raw = ptr::null_mut();
         // SAFETY: as in `load_step`.
         let rc = unsafe { ffi::fb_load_iges(bytes.as_ptr(), bytes.len(), &mut raw) };
+        Self::from_raw(rc, raw)
+    }
+
+    /// Offsets planar loops in the z = 0 plane (see `fb_offset_loops` in the shim header for the
+    /// encoding). The result has one face per resulting loop.
+    pub fn offset_loops(data: &[f64], distance: f64) -> Result<Shape, OcctError> {
+        let mut raw = ptr::null_mut();
+        // SAFETY: `data` is valid for `data.len()` reads during the call; `raw` is an out-pointer.
+        let rc = unsafe { ffi::fb_offset_loops(data.as_ptr(), data.len(), distance, &mut raw) };
         Self::from_raw(rc, raw)
     }
 

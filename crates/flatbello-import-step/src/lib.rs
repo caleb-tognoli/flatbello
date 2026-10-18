@@ -9,6 +9,10 @@ use flatbello_core::{
 };
 use flatbello_occt::{CurveKind, OcctError, Shape, SurfaceKind};
 
+mod offset;
+
+pub use offset::offset_profile;
+
 pub struct StepImporter;
 pub struct IgesImporter;
 
@@ -53,7 +57,7 @@ impl Importer for IgesImporter {
     }
 }
 
-fn import_error(e: OcctError) -> ImportError {
+pub(crate) fn import_error(e: OcctError) -> ImportError {
     match e {
         OcctError::Read(m) | OcctError::Empty(m) => ImportError::Malformed(m),
         other => ImportError::Backend(other.to_string()),
@@ -125,7 +129,7 @@ fn build_model(shape: Shape, options: &ImportOptions) -> Result<SelectableModel,
     })
 }
 
-fn read_wire(
+pub(crate) fn read_wire(
     shape: &Shape,
     face: usize,
     wire: usize,

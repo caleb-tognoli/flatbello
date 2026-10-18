@@ -25,6 +25,7 @@ const LIB_CANDIDATES: &[&str] = &[
 
 /// Toolkits needed by every build, in dependency order (users first).
 const COMMON_LIBS: &[&str] = &[
+    "TKOffset",
     "TKMesh",
     "TKBO",
     "TKPrim",

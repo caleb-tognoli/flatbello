@@ -11,7 +11,7 @@ use flatbello_export_dxf::{DxfR12Exporter, DxfR2000Exporter};
 use flatbello_export_svg::SvgExporter;
 use flatbello_extract::{ExtractError, extract_mesh_face, extract_planar};
 use flatbello_import_mesh::{ObjImporter, StlImporter};
-use flatbello_import_step::{IgesImporter, StepImporter};
+use flatbello_import_step::{IgesImporter, StepImporter, offset_profile};
 
 pub use flatbello_extract::{ExtractOptions, XAxisRule};
 
@@ -212,8 +212,8 @@ impl Engine {
                     continue;
                 }
                 let (Ok(pa), Ok(pb)) = (
-                    self.extract(id, &[fa], options),
-                    self.extract(id, &[fb], options),
+                    self.extract_exact(id, &[fa], options),
+                    self.extract_exact(id, &[fb], options),
                 ) else {
                     continue;
                 };
@@ -245,8 +245,25 @@ impl Engine {
         export(&laid, format, options)
     }
 
-    /// One profile per requested face, in the order given.
+    /// One profile per requested face, in the order given, offset for the kerf if one is set.
     pub fn extract(
+        &self,
+        id: ModelId,
+        faces: &[FaceId],
+        options: &ExtractOptions,
+    ) -> Result<Vec<Profile2D>, EngineError> {
+        let profiles = self.extract_exact(id, faces, options)?;
+        if options.kerf_width > 0.0 {
+            let half = options.kerf_width / 2.0;
+            return profiles
+                .iter()
+                .map(|p| Ok(offset_profile(p, half, &options.tolerance)?))
+                .collect();
+        }
+        Ok(profiles)
+    }
+
+    fn extract_exact(
         &self,
         id: ModelId,
         faces: &[FaceId],

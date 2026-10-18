@@ -30,6 +30,9 @@ pub struct ExtractOptions {
     /// Mesh faces only: round circular holes to the nearest standard drill size when they are
     /// within [`crate::mesh::SNAP_DISTANCE`] of one. Off by default.
     pub snap_hole_sizes: bool,
+    /// The cutter's kerf in mm. When positive, profiles are offset outward by half of it (holes
+    /// shrink), so the cut part comes out at its true size. Applied by the engine.
+    pub kerf_width: f64,
 }
 
 #[derive(Clone, Debug)]

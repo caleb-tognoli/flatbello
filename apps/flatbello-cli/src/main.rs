@@ -13,13 +13,14 @@ usage: flatbello-cli <command>
 commands:
   faces <model>            list the faces of a STEP or IGES model
   export <model> --face <n> [--face <n> ...] [--format dxf|dxf-r12|svg]
-         [--x-axis longest|plane] [--native-curves] [--closed-polylines] [--snap-holes]
+         [--x-axis longest|plane] [--native-curves] [--closed-polylines] [--snap-holes] [--kerf <mm>]
          -o <file>
                            write the profiles of the given faces, side by side, in mm.
                            dxf is DXF R2000. --native-curves keeps ellipses and splines
                            (R2000 only); --closed-polylines writes each loop as one closed
                            LWPOLYLINE with arc bulges (R2000 only); --snap-holes rounds mesh
-                           holes to standard drill sizes
+                           holes to standard drill sizes; --kerf <mm> offsets outlines by
+                           half the cutter's kerf so parts come out at true size
   batch <model> --thickness <mm> [export options] -o <dir>
                            write every plate of that thickness (two flat faces facing
                            away from each other, that far apart) to its own file
@@ -137,6 +138,14 @@ fn parse_job<'a>(command: &str, args: &'a [String]) -> Result<Job<'a>, String> {
             "--native-curves" => export.native_curves = true,
             "--closed-polylines" => export.loops_as_polylines = true,
             "--snap-holes" => extract.snap_hole_sizes = true,
+            "--kerf" => {
+                let v = value()?;
+                let k: f64 = v.parse().map_err(|_| format!("bad kerf \"{v}\""))?;
+                if !(k.is_finite() && k >= 0.0) {
+                    return Err(format!("bad kerf \"{v}\""));
+                }
+                extract.kerf_width = k;
+            }
             "-o" => out = Some(value()?),
             _ if model.is_none() && !arg.starts_with('-') => model = Some(arg),
             _ => return Err(format!("unexpected argument \"{arg}\"\n\n{USAGE}")),

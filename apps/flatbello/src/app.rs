@@ -97,6 +97,8 @@ pub struct App {
     snap_hole_sizes: bool,
     /// Thickness (mm) for "Select plates".
     plate_thickness: f64,
+    /// Cutter kerf (mm); 0 for none.
+    kerf_width: f64,
     x_axis: XAxisRule,
     one_file_per_face: bool,
     status: String,
@@ -137,6 +139,7 @@ impl App {
             closed_polylines: false,
             snap_hole_sizes: false,
             plate_thickness: 3.0,
+            kerf_width: 0.0,
             x_axis: XAxisRule::LongestStraightEdge,
             one_file_per_face: false,
             status: "Open a STEP, IGES, STL or OBJ model, or drop one on the window.".into(),
@@ -189,6 +192,7 @@ impl App {
             native_curves: self.native_curves,
             loops_as_polylines: self.closed_polylines,
             snap_hole_sizes: self.snap_hole_sizes,
+            kerf_width: self.kerf_width,
         }
     }
 
@@ -556,7 +560,21 @@ impl App {
             .on_hover_text(
                 "Round mesh holes within 0.02 mm of a standard drill size to that size.",
             );
-        if self.x_axis != before || snap.changed() {
+        let kerf = ui
+            .horizontal(|ui| {
+                ui.label("Kerf");
+                ui.add(
+                    egui::DragValue::new(&mut self.kerf_width)
+                        .range(0.0..=10.0)
+                        .speed(0.01)
+                        .suffix(" mm"),
+                )
+                .on_hover_text(
+                    "Offset outlines by half the kerf so parts come out at true size. 0 for none.",
+                )
+            })
+            .inner;
+        if self.x_axis != before || snap.changed() || kerf.changed() {
             self.update_preview();
         }
         ui.add_enabled(

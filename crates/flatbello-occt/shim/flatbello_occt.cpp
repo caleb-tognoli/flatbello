@@ -6,6 +6,15 @@
 #include "flatbello_occt.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Pln.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -44,9 +53,6 @@
 #ifdef FB_FIXTURES
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
-#include <BRepBuilderAPI_MakeEdge.hxx>
-#include <BRepBuilderAPI_MakeFace.hxx>
-#include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
@@ -59,6 +65,7 @@
 #endif
 
 #include <cctype>
+#include <cmath>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -536,6 +543,104 @@ int fb_face_mesh(fb_shape *shape, size_t face, double *nodes, size_t node_cap, s
             t[0] = static_cast<uint32_t>(a - 1);
             t[1] = static_cast<uint32_t>(b - 1);
             t[2] = static_cast<uint32_t>(c - 1);
+        }
+        return FB_OK;
+    });
+}
+
+namespace {
+
+/// Reads the loops encoded for fb_offset_loops into wires. Joints share vertices whose tolerance
+/// covers the up-to-1e-3 mm gaps between consecutive edges.
+std::vector<TopoDS_Wire> decode_loops(const double *data, size_t len) {
+    size_t i = 0;
+    auto next = [&]() -> double {
+        if (i >= len) throw std::runtime_error("truncated loop data");
+        return data[i++];
+    };
+    const double joint_tolerance = 1e-3;
+    const gp_Dir up(0, 0, 1), down(0, 0, -1), xdir(1, 0, 0);
+    BRep_Builder builder;
+    std::vector<TopoDS_Wire> wires;
+    while (i < len) {
+        const size_t count = static_cast<size_t>(next());
+        if (count == 0) throw std::runtime_error("empty loop");
+        struct Seg {
+            int kind;
+            double v[6];
+        };
+        std::vector<Seg> segs(count);
+        for (auto &s : segs) {
+            s.kind = static_cast<int>(next());
+            const int n = s.kind == FB_SEG_LINE ? 4 : s.kind == FB_SEG_ARC ? 6 : 4;
+            for (int k = 0; k < n; ++k) s.v[k] = next();
+        }
+        auto start = [](const Seg &s) {
+            switch (s.kind) {
+            case FB_SEG_LINE: return gp_Pnt(s.v[0], s.v[1], 0);
+            case FB_SEG_ARC: return gp_Pnt(s.v[0] + s.v[2] * std::cos(s.v[3]),
+                                           s.v[1] + s.v[2] * std::sin(s.v[3]), 0);
+            default: return gp_Pnt(s.v[0] + s.v[2], s.v[1], 0);
+            }
+        };
+        std::vector<TopoDS_Vertex> joints(count);
+        for (size_t k = 0; k < count; ++k) builder.MakeVertex(joints[k], start(segs[k]), joint_tolerance);
+        BRepBuilderAPI_MakeWire wire;
+        for (size_t k = 0; k < count; ++k) {
+            const Seg &s = segs[k];
+            const TopoDS_Vertex &a = joints[k], &b = joints[(k + 1) % count];
+            TopoDS_Edge e;
+            if (s.kind == FB_SEG_LINE) {
+                e = BRepBuilderAPI_MakeEdge(a, b).Edge();
+            } else {
+                const bool ccw = (s.kind == FB_SEG_ARC ? s.v[5] : s.v[3]) != 0.0;
+                gp_Circ c(gp_Ax2(gp_Pnt(s.v[0], s.v[1], 0), ccw ? up : down, xdir), s.v[2]);
+                e = s.kind == FB_SEG_CIRCLE ? BRepBuilderAPI_MakeEdge(c, a, a).Edge()
+                                            : BRepBuilderAPI_MakeEdge(c, a, b).Edge();
+            }
+            wire.Add(e);
+            if (!wire.IsDone()) throw std::runtime_error("loop edges do not connect");
+        }
+        wires.push_back(wire.Wire());
+    }
+    if (wires.empty()) throw std::runtime_error("no loops");
+    return wires;
+}
+
+} // namespace
+
+extern "C" int fb_offset_loops(const double *data, size_t len, double distance, fb_shape **out) {
+    return guard([&]() -> int {
+        if (!data || !out) return fail(FB_EINVAL, "null argument");
+        *out = nullptr;
+        std::vector<TopoDS_Wire> wires = decode_loops(data, len);
+        const gp_Pln plane(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
+        // Each loop is offset as the region it encloses: the outer boundary grows by `distance`,
+        // holes shrink by it. A hole that shrinks away is dropped. One face per resulting loop;
+        // Rust decides which one is the outer boundary.
+        TopoDS_Compound result;
+        BRep_Builder builder;
+        builder.MakeCompound(result);
+        for (size_t k = 0; k < wires.size(); ++k) {
+            BRepBuilderAPI_MakeFace region(plane, wires[k], Standard_True);
+            if (!region.IsDone()) return fail(FB_EOCCT, "cannot build a face from a loop");
+            const double d = k == 0 ? distance : -distance;
+            BRepOffsetAPI_MakeOffset offset(region.Face(), GeomAbs_Arc);
+            offset.Perform(d);
+            if (!offset.IsDone()) {
+                if (k == 0) return fail(FB_EOCCT, "offset failed");
+                continue;
+            }
+            for (TopExp_Explorer w(offset.Shape(), TopAbs_WIRE); w.More(); w.Next()) {
+                BRepBuilderAPI_MakeFace f(plane, TopoDS::Wire(w.Current()), Standard_True);
+                if (f.IsDone()) builder.Add(result, f.Face());
+            }
+        }
+        *out = wrap(result, 1.0);
+        if ((*out)->cache.empty()) {
+            fb_shape_free(*out);
+            *out = nullptr;
+            return fail(FB_EEMPTY, "the offset removed the whole region");
         }
         return FB_OK;
     });
