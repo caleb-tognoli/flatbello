@@ -88,7 +88,7 @@ cargo deny check licenses bans sources
 
 ## Installing OCCT
 
-Flatbello links OCCT dynamically (OCCT is LGPL-2.1 with an exception). CI tests OCCT 7.6 and 7.9; the build
+Flatbello links OCCT dynamically (OCCT is LGPL-2.1 with an exception). CI tests OCCT 7.6 and 7.9 on Linux, 7.9 on macOS and 8.0 on Windows; the build
 reads `Standard_Version.hxx` and links the toolkit names of that version (OCCT 7.8 merged TKSTEP, TKIGES and
 others into TKDESTEP, TKDEIGES, ...).
 

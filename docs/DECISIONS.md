@@ -217,3 +217,10 @@ macOS Gatekeeper will warn until signing certificates are set up.
 holes to the nearest standard drill diameter when they are within 0.02 mm of it: 0.1 mm steps for metric
 or unitless parts, 1/64 in steps for parts in inches or feet. Exact (STEP/IGES) geometry is never
 changed. Caleb may want a different size table (for example clearance holes for metric screws).
+
+## 2026-10-18 — Platforms in CI
+
+CI builds and tests on Ubuntu 26.04 (OCCT 7.9.2) and 24.04 (OCCT 7.6.3), macOS (Homebrew OCCT 7.9.3) and
+Windows (vcpkg OCCT 8.0.1, x64-windows-release, cached after the first build). All jobs block merges.
+The Package workflow builds the .deb, the NSIS installer and the .dmg as artifacts. OCCT 8.0's
+exceptions are no longer transients, so the shim names the exception type only before 8.0.
